@@ -30,12 +30,13 @@ if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]; then
     if [ "${current_scaling}" != "performance" ]; then
         file_list=$(ls /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor)
         for cpu_file in ${file_list}; do
-            echo "performance" | sudo tee ${cpu_file} > /dev/null
+	    echo "test"   
+	# echo "performance" | sudo tee ${cpu_file} > /dev/null
         done
     fi
 fi
 
-$rootdir/scripts/turboboost.sh disable
+#$rootdir/scripts/turboboost.sh disable
 
 export LD_PRELOAD=$bindir"/src/lib/libnvmemul.so"
 export NVMEMUL_INI=$rootdir"/nvmemul.ini"

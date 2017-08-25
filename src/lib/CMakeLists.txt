@@ -42,6 +42,7 @@ add_definitions(-std=gnu89)
 #add_definitions(-std=c99)
 add_definitions(-msse4)
 add_subdirectory(cpu)
+#$<TARGET_OBJECTS:objlib> will reference the object named objlib
 add_library(nvmemul SHARED ${nvmemul_src} $<TARGET_OBJECTS:cpu>)
 target_link_libraries(nvmemul dl)
 target_link_libraries(nvmemul config)

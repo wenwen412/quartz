@@ -14,9 +14,9 @@ Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 
 #include <stdio.h>
 #include <unistd.h>
+#include <time.h>
 
-
-#define BUF_SIZE (2048)
+#define BUF_SIZE (4*2048)
 
 unsigned long mem[BUF_SIZE][BUF_SIZE];
 
@@ -33,7 +33,7 @@ void iter()
 	}
 
 	k = 0;
-	while(1) {
+	//while(1) {
 		for (i=0; i < BUF_SIZE; ++i) {
 			__asm__ __volatile__("");
 			for (j=0; j < BUF_SIZE; ++j) {
@@ -41,13 +41,17 @@ void iter()
 		        mem[j][i] = k;
 			}
 		}
-//		fprintf(stdout, "k is %lu\n", (unsigned long)k);
-		usleep(1000);
-	}
+	//}
 }
 
 int main()
 {
+    clock_t start_time, end_time;
+    double duration;
+    start_time = clock();
     iter();
+    end_time = clock();
+    duration = (double)(end_time - start_time) / CLOCKS_PER_SEC;
+    printf( "%f seconds for DRAM\n", duration );
     return 0;
 }
