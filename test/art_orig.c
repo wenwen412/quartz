@@ -20,11 +20,24 @@
 #define SET_LEAF(x) ((void*)((uintptr_t)x | 1))
 #define LEAF_RAW(x) ((art_leaf*)((void*)((uintptr_t)x & ~1)))
 
+/**********************************************************************
+ * ********   pmalloc() and pfree() wrap psedo code  ******************
+ */
+
+/*
+void* pmalloc (size_t size){
+    return malloc(size);
+}
+
+void pfree (void *ptr, size_t size){
+    return free(ptr);
+}
+*/
 
 void *custom_calloc(size_t n, size_t size)
 {
 	size_t total = n * size;
-	void *p = malloc(total);
+	void *p = pmalloc(total);
 	
 	if (!p) return NULL;
 	
@@ -70,12 +83,14 @@ int art_tree_init(art_tree *t) {
 
 // Recursively destroys the tree
 static void destroy_node(art_node *n) {
+	art_leaf *l;
     // Break if null
     if (!n) return;
 
     // Special case leafs
     if (IS_LEAF(n)) {
-        free(LEAF_RAW(n));
+		l = (art_leaf *)LEAF_RAW(n);
+        pfree(LEAF_RAW(n), sizeof(art_leaf) + l->key_len);
         return;
     }
 
@@ -93,6 +108,7 @@ static void destroy_node(art_node *n) {
             for (i=0;i<n->num_children;i++) {
                 destroy_node(p.p1->children[i]);
             }
+            pfree(n, sizeof(art_node4));
             break;
 
         case NODE16:
@@ -122,7 +138,7 @@ static void destroy_node(art_node *n) {
     }
 
     // Free ourself on the way up
-    free(n);
+    pfree(n, sizeof(n));
 }
 
 /**
