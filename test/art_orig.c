@@ -429,7 +429,7 @@ static void add_child48(art_node48 *n, art_node **ref, unsigned char c, void *ch
         }
         copy_header((art_node*)new_node, (art_node*)n);
         *ref = (art_node*)new_node;
-        free(n);
+        pfree(n, sizeof(art_node48));
         add_child256(new_node, ref, c, child);
     }
 }
@@ -497,7 +497,7 @@ static void add_child16(art_node16 *n, art_node **ref, unsigned char c, void *ch
         }
         copy_header((art_node*)new_node, (art_node*)n);
         *ref = (art_node*)new_node;
-        free(n);
+        pfree(n, sizeof(art_node16));
         add_child48(new_node, ref, c, child);
     }
 }
@@ -529,7 +529,7 @@ static void add_child4(art_node4 *n, art_node **ref, unsigned char c, void *chil
                 sizeof(unsigned char)*n->n.num_children);
         copy_header((art_node*)new_node, (art_node*)n);
         *ref = (art_node*)new_node;
-        free(n);
+        pfree(n, sizeof(art_node4));
         add_child16(new_node, ref, c, child);
     }
 }
@@ -693,7 +693,7 @@ static void remove_child256(art_node256 *n, art_node **ref, unsigned char c) {
                 pos++;
             }
         }
-        free(n);
+        pfree(n, sizeof(art_node256));
     }
 }
 
@@ -717,7 +717,7 @@ static void remove_child48(art_node48 *n, art_node **ref, unsigned char c) {
                 child++;
             }
         }
-        free(n);
+        pfree(n, sizeof(art_node48));
     }
 }
 
@@ -733,7 +733,7 @@ static void remove_child16(art_node16 *n, art_node **ref, art_node **l) {
         copy_header((art_node*)new_node, (art_node*)n);
         memcpy(new_node->keys, n->keys, 4);
         memcpy(new_node->children, n->children, 4*sizeof(void*));
-        free(n);
+        free(n, sizeof(art_node16));
     }
 }
 
@@ -764,7 +764,7 @@ static void remove_child4(art_node4 *n, art_node **ref, art_node **l) {
             child->partial_len += n->n.partial_len + 1;
         }
         *ref = child;
-        free(n);
+        pfree(n, sizeof(art_node4));
     }
 }
 
@@ -838,7 +838,7 @@ void* art_delete(art_tree *t, const unsigned char *key, int key_len) {
     if (l) {
         t->size--;
         void *old = l->value;
-        free(l);
+        pfree(l, sizeof(art_leaf) + l->key_len);
         return old;
     }
     return NULL;
