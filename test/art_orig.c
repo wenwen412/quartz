@@ -733,7 +733,7 @@ static void remove_child16(art_node16 *n, art_node **ref, art_node **l) {
         copy_header((art_node*)new_node, (art_node*)n);
         memcpy(new_node->keys, n->keys, 4);
         memcpy(new_node->children, n->children, 4*sizeof(void*));
-        free(n, sizeof(art_node16));
+        pfree(n, sizeof(art_node16));
     }
 }
 
