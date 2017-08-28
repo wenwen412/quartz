@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include "art_orig.h"
+#include "../src/lib/pmalloc.h"
 
 #ifdef __i386__
     #include <emmintrin.h>
