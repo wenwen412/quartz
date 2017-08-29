@@ -34,7 +34,6 @@ void pfree (void *ptr, size_t size){
     return free(ptr);
 }
 */
-
 void *custom_calloc(size_t n, size_t size)
 {
 	size_t total = n * size;
@@ -137,9 +136,6 @@ static void destroy_node(art_node *n) {
         default:
             abort();
     }
-
-    // Free ourself on the way up
-    pfree(n, sizeof(n));
 }
 
 /**

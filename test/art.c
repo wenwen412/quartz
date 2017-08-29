@@ -31,7 +31,7 @@
 /**********************************************************************
  * ********   pmalloc() and pfree() wrap psedo code  ******************
  */
-
+/*
 void* pmalloc (size_t size){
     return malloc(size);
 }
@@ -39,7 +39,7 @@ void* pmalloc (size_t size){
 void pfree (void *ptr, size_t size){
     return free(ptr);
 }
-
+*/
 
 
 /**********************************************************************
