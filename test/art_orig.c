@@ -410,7 +410,7 @@ static void add_child256(art_node256 *n, art_node **ref, unsigned char c, void *
      if (COW) 
 		{
 			art_node256 * bak = (art_node256 *)alloc_node(NODE256);
-			memccpy(bak, n, sizeof(art_node256));
+			memcpy(bak, n, sizeof(art_node256));
 			pfree(bak, sizeof(art_node256));
 		}
     n->n.num_children++;
@@ -423,7 +423,7 @@ static void add_child48(art_node48 *n, art_node **ref, unsigned char c, void *ch
         if (COW) 
 			{
 				art_node48 * bak = (art_node48 *)alloc_node(NODE48);
-				memccpy(bak, n, sizeof(art_node48));
+				memcpy(bak, n, sizeof(art_node48));
 				pfree(bak, sizeof(art_node48));
 			}
         while (n->children[pos]) pos++;
@@ -488,7 +488,7 @@ static void add_child16(art_node16 *n, art_node **ref, unsigned char c, void *ch
         if (COW) 
 		{
 			art_node16 * bak = (art_node16 *)alloc_node(NODE16);
-			memccpy(bak, n, sizeof(art_node16));
+			memcpy(bak, n, sizeof(art_node16));
 			pfree(bak, sizeof(art_node16));
 		}
             memmove(n->keys+idx+1,n->keys+idx,n->n.num_children-idx);
@@ -529,7 +529,7 @@ static void add_child4(art_node4 *n, art_node **ref, unsigned char c, void *chil
 		if (COW) 
 		{
 			art_node4 * bak = (art_node4 *)alloc_node(NODE4);
-			memccpy(bak, n, sizeof(art_node4));
+			memcpy(bak, n, sizeof(art_node4));
 			pfree(bak, sizeof(art_node4));
 		}
         // Shift to make room
