@@ -14,6 +14,7 @@
 #endif
 #endif
 
+
 /**
  * Macros to manipulate pointer tags
  */
@@ -21,6 +22,7 @@
 #define SET_LEAF(x) ((void*)((uintptr_t)x | 1))
 #define LEAF_RAW(x) ((art_leaf*)((void*)((uintptr_t)x & ~1)))
 
+int COW = 1;
 /**********************************************************************
  * ********   pmalloc() and pfree() wrap psedo code  ******************
  */
@@ -405,6 +407,12 @@ static void copy_header(art_node *dest, art_node *src) {
 
 static void add_child256(art_node256 *n, art_node **ref, unsigned char c, void *child) {
     (void)ref;
+     if (COW) 
+		{
+			art_node256 * bak = (art_node256 *)alloc_node(NODE256);
+			memccpy(bak, n, sizeof(art_node256));
+			pfree(bak, sizeof(art_node256));
+		}
     n->n.num_children++;
     n->children[c] = (art_node*)child;
 }
@@ -412,6 +420,12 @@ static void add_child256(art_node256 *n, art_node **ref, unsigned char c, void *
 static void add_child48(art_node48 *n, art_node **ref, unsigned char c, void *child) {
     if (n->n.num_children < 48) {
         int pos = 0;
+        if (COW) 
+			{
+				art_node48 * bak = (art_node48 *)alloc_node(NODE48);
+				memccpy(bak, n, sizeof(art_node48));
+				pfree(bak, sizeof(art_node48));
+			}
         while (n->children[pos]) pos++;
         n->children[pos] = (art_node*)child;
         n->keys[c] = pos + 1;
@@ -471,6 +485,12 @@ static void add_child16(art_node16 *n, art_node **ref, unsigned char c, void *ch
         unsigned idx;
         if (bitfield) {
             idx = __builtin_ctz(bitfield);
+        if (COW) 
+		{
+			art_node16 * bak = (art_node16 *)alloc_node(NODE16);
+			memccpy(bak, n, sizeof(art_node16));
+			pfree(bak, sizeof(art_node16));
+		}
             memmove(n->keys+idx+1,n->keys+idx,n->n.num_children-idx);
             memmove(n->children+idx+1,n->children+idx,
                     (n->n.num_children-idx)*sizeof(void*));
@@ -504,7 +524,14 @@ static void add_child4(art_node4 *n, art_node **ref, unsigned char c, void *chil
         for (idx=0; idx < n->n.num_children; idx++) {
             if (c < n->keys[idx]) break;
         }
-
+        //Only add Cpoy_on_write cost, ignore pointer switch cost
+        //THIS IS NOT REAL COW!!!
+		if (COW) 
+		{
+			art_node4 * bak = (art_node4 *)alloc_node(NODE4);
+			memccpy(bak, n, sizeof(art_node4));
+			pfree(bak, sizeof(art_node4));
+		}
         // Shift to make room
         memmove(n->keys+idx+1, n->keys+idx, n->n.num_children - idx);
         memmove(n->children+idx+1, n->children+idx,
@@ -581,11 +608,13 @@ static void* recursive_insert(art_node *n, art_node **ref, const unsigned char *
         art_leaf *l = LEAF_RAW(n);
 
         // Check if we are updating an existing value
+        //For COW, we don't need to do COW since l only update a pointer
         if (!leaf_matches(l, key, key_len, depth)) {
-            *old = 1;
-            void *old_val = l->value;
-            l->value = value;
-            return old_val;
+			*old = 1;
+			void *old_val = l->value;
+			l->value = value;
+			return old_val;
+
         }
 
         // New value, we must split the leaf into a node4
