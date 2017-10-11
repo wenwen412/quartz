@@ -11,42 +11,32 @@ should have received a copy of the GNU General Public License along
 with this program; if not, write to the Free Software Foundation,
 Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 ***************************************************************************/
-#include <pthread.h>
-#include <stdlib.h>
+#ifndef __PFLUSH_H
+#define __PFLUSH_H
+
+/**
+ * \file
+ * 
+ * \page pflush_api Persistent Memory API 
+ *
+ * Method to be used by client to inject a write latency.
+ */
+
 #include <stdint.h>
-#include <stdio.h>
-#include <stddef.h>
-#include "gtest/gtest.h"
 
-#define MAX_NUM_THREADS 128
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-pthread_mutex_t mutex;
+void init_pflush(int cpu_speed_mhz, int write_latency_ns);
 
-void* worker(void* args) 
-{
-//    int i;
-//    char* array = (char*) malloc(1024*1024);
+/**
+ * \brief Flush the cacheline containing address addr.
+ */
+void pflush(uint64_t *addr);
 
-    pthread_mutex_lock(&mutex);
-
-    pthread_mutex_unlock(&mutex);
-    return NULL;
+#ifdef __cplusplus
 }
+#endif
 
-
-int main(int argc, char** argv)
-{
-	pthread_t thread[MAX_NUM_THREADS];
-	int thread_count = 4;
-	int i;
-//    int sum;
-
-    pthread_mutex_init(&mutex, NULL);
-    pthread_mutex_lock(&mutex);
-    pthread_mutex_unlock(&mutex);
-	for (i = 0; i< thread_count; i++)	
-		pthread_create(&thread[i], NULL, worker, NULL);
-
-	for(i = 0 ; i < thread_count ; i++)
-		pthread_join(thread[i], NULL);
-}
+#endif /* __PFLUSH_H */
