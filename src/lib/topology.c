@@ -239,6 +239,7 @@ static int load_mc_pci_topology(const char* path, physical_node_t* physical_node
     free(line);
     if (dev_count < num_physical_nodes) {
         DBG_LOG(WARNING, "No complete memory-controller pci topology found in %s\n", path);
+        DBG_LOG(WARNING, "dev_count is %d, physical node number is %d\n", dev_count, num_physical_nodes);
     }
     fclose(fp);
     return E_SUCCESS;

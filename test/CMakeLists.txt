@@ -8,8 +8,15 @@ add_definitions(-Wall)
 add_executable(test_art ${CMAKE_CURRENT_SOURCE_DIR}/test_art.c ${CMAKE_CURRENT_SOURCE_DIR}/art.c ${CMAKE_CURRENT_SOURCE_DIR}/art.h)
 target_link_libraries(test_art nvmemul)
 
+add_executable(test_woart ${CMAKE_CURRENT_SOURCE_DIR}/test_woart.c ${CMAKE_CURRENT_SOURCE_DIR}/woart.c ${CMAKE_CURRENT_SOURCE_DIR}/woart.h)
+target_link_libraries(test_woart nvmemul)
+
+
 add_executable(test_art_orig ${CMAKE_CURRENT_SOURCE_DIR}/test_art_orig.c ${CMAKE_CURRENT_SOURCE_DIR}/art_orig.c ${CMAKE_CURRENT_SOURCE_DIR}/art_orig.h)
 target_link_libraries(test_art_orig nvmemul)
+
+add_executable(test_nvm_remote_read ${CMAKE_CURRENT_SOURCE_DIR}/test_nvm_remote_read.c)
+target_link_libraries(test_nvm_remote_read nvmemul)
 
 #add_executable(test_interpose ${CMAKE_CURRENT_SOURCE_DIR}/test_interpose.cc)
 #target_link_libraries(test_interpose pthread gtest)

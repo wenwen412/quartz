@@ -1,4 +1,8 @@
-#include "art.h"
+//
+// Created by WenPan on 10/11/17.
+//
+
+#include "woart.h"
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
@@ -18,7 +22,6 @@ int fail_unless(int8_t conditiona)
 
 int test_art_insert()
 {
-    printf("start test_art_insert\n");
     art_tree t;
     int res = art_tree_init(&t);
     //fail_unless(res == 0, "error, res != 0");
@@ -29,6 +32,7 @@ int test_art_insert()
 
     uintptr_t line = 1;
     while (fgets(buf, sizeof buf, f)) {
+        printf("\n",line);
         len = strlen(buf);
         buf[len-1] = '\0';
         art_insert(&t, (unsigned char*)buf, len, (void*)line);
@@ -38,7 +42,7 @@ int test_art_insert()
         //fail_unless(art_size(&t) == line);
         line++;
     }
-    printf("Start destory radix tree");
+
     res = art_tree_destroy(&t);
     if(!res)
         return 1;
@@ -49,7 +53,6 @@ int test_art_insert()
 
 int test_art_insert_verylong()
 {
-    printf("start test_art_insert_verylong\n");
     art_tree t;
     int res = art_tree_init(&t);
     fail_unless(res == 0);
@@ -111,7 +114,7 @@ int test_art_insert_search()
 
     int len;
     char buf[512];
-    FILE *f = fopen("variable_values.dat", "r");
+    FILE *f = fopen("words.txt", "r");
 
     uintptr_t line = 1;
 
@@ -119,8 +122,6 @@ int test_art_insert_search()
     start = clock();
     while (fgets(buf, sizeof buf, f)) {
         len = strlen(buf);
-	if (line > 1000000)
-		break;
         buf[len-1] = '\0';
         fail_unless(NULL ==
                     art_insert(&t, (unsigned char*)buf, len, (void*)line));
@@ -136,7 +137,7 @@ int test_art_insert_search()
     // Search for each line
     line = 1;
     start = clock();
-/*    while (fgets(buf, sizeof buf, f)) {
+    while (fgets(buf, sizeof buf, f)) {
         len = strlen(buf);
         buf[len-1] = '\0';
 
@@ -149,7 +150,6 @@ int test_art_insert_search()
 
         line++;
     }
-*/
     finish = clock();
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
     printf( "%WOART search spends %f seconds\n", duration );
@@ -167,9 +167,9 @@ int test_art_insert_search()
     fail_unless(res == 0);
 }
 
+
 int test_art_insert_delete()
 {
-    printf("start test_art_insert_delete\n");
     art_tree t;
     int res = art_tree_init(&t);
     fail_unless(res == 0);
@@ -233,7 +233,6 @@ int iter_cb(void *data, const unsigned char* key, uint32_t key_len, void *val) {
 
 int test_art_insert_iter()
 {
-    printf("start test_art_insert_iter\n");
     art_tree t;
     int res = art_tree_init(&t);
     fail_unless(res == 0);
@@ -271,7 +270,6 @@ int main(void) {
     double duration;
     start = clock();
 
-    printf("start main() of art_test\n");
     //test_art_insert();
     //test_art_insert_verylong();
     test_art_insert_search();
@@ -282,3 +280,4 @@ int main(void) {
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
     printf( "%f seconds\n", duration );
 }
+
