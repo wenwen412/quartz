@@ -4,6 +4,9 @@
 #include <fcntl.h>
 #include <time.h>
 #include <inttypes.h>
+#include "flush_delay.h"
+
+extern int extera_latency;
 
 
 int fail_unless(int8_t conditiona)
@@ -18,7 +21,6 @@ int fail_unless(int8_t conditiona)
 
 int test_art_insert()
 {
-    printf("start test_art_insert\n");
     art_tree t;
     int res = art_tree_init(&t);
     //fail_unless(res == 0, "error, res != 0");
@@ -29,6 +31,7 @@ int test_art_insert()
 
     uintptr_t line = 1;
     while (fgets(buf, sizeof buf, f)) {
+        printf("\n",line);
         len = strlen(buf);
         buf[len-1] = '\0';
         art_insert(&t, (unsigned char*)buf, len, (void*)line);
@@ -38,7 +41,7 @@ int test_art_insert()
         //fail_unless(art_size(&t) == line);
         line++;
     }
-    printf("Start destory radix tree");
+
     res = art_tree_destroy(&t);
     if(!res)
         return 1;
@@ -49,7 +52,6 @@ int test_art_insert()
 
 int test_art_insert_verylong()
 {
-    printf("start test_art_insert_verylong\n");
     art_tree t;
     int res = art_tree_init(&t);
     fail_unless(res == 0);
@@ -101,7 +103,76 @@ int test_art_insert_verylong()
     fail_unless(res == 0);
 }
 
-int test_art_insert_search()
+int test_art_recovery(art_tree *t)
+{
+    clock_t start, finish;
+    double duration;
+
+    art_tree t2;
+    int res2 = art_tree_init(&t2);
+    fail_unless(res2 == 0);
+    start = clock();
+    art_recover(&t2, t);
+    finish = clock();
+    duration = (double)(finish - start) / CLOCKS_PER_SEC;
+    printf( "WOART rebuild spends %f seconds\n", duration );
+}
+
+
+int test_art_search(art_tree *t, FILE *f){
+
+    clock_t start, finish;
+    double duration;
+    int len;
+    char buf[512];
+
+    // Seek back to the start
+    fseek(f, 0, SEEK_SET);
+    // Search for each line
+    uint64_t line = 1;
+    start = clock();
+    while (fgets(buf, sizeof buf, f)) {
+        len = strlen(buf);
+        buf[len-1] = '\0';
+
+        uint64_t *val = (uint64_t*)art_search(&t, (unsigned char*)buf, len);
+	
+        //if (fail_unless(line == *val))
+        //{
+        //   printf("Line: %d Val: %" PRIuPTR " Str: %s\n", line,
+        //           val, buf);
+        //}
+	
+        line++;
+    }
+    finish = clock();
+    duration = (double)(finish - start) / CLOCKS_PER_SEC;
+    printf( "RART search spends %f seconds\n", duration );
+}
+
+int test_art_update(art_tree *t, FILE *f){
+    clock_t start, finish;
+    double duration;
+    int len;
+    char buf[512];
+    fseek(f, 0, SEEK_SET);
+
+    uint64_t line = 1;
+    start = clock();
+    while (fgets(buf, sizeof buf, f)) {
+        len = strlen(buf);
+        buf[len-1] = '\0';
+        fail_unless(NULL ==
+                    art_insert(&t, (unsigned char*)buf, len, &line));
+        line++;
+    }
+    finish = clock();
+    duration = (double)(finish - start) / CLOCKS_PER_SEC;
+    printf( "RART update spends %f seconds\n", duration );
+}
+
+
+int test_art_insert_search(char * filename)
 {
     art_tree t;
     clock_t start, finish;
@@ -111,65 +182,221 @@ int test_art_insert_search()
 
     int len;
     char buf[512];
-    FILE *f = fopen("variable_values.dat", "r");
+    FILE *f = fopen(filename, "r");
 
-    uintptr_t line = 1;
-
-
+    uint64_t line = 1;
     start = clock();
     while (fgets(buf, sizeof buf, f)) {
         len = strlen(buf);
-	if (line > 1000000)
-		break;
         buf[len-1] = '\0';
+	/*
         fail_unless(NULL ==
-                    art_insert(&t, (unsigned char*)buf, len, (void*)line));
+                    art_insert(&t, (unsigned char*)buf, len, &line));*/
+	art_insert(&t, (unsigned char*)buf, len, &line);
+        line++;
+    }
+    uint64_t nlines = line - 1;
+    finish = clock();
+    duration = (double)(finish - start) / CLOCKS_PER_SEC;
+    printf( "RART Insert spends %f seconds\n", duration );
+
+    //test_range_query(&t, 10000);
+
+    //test_art_recovery(&t);
+
+    // rebuild
+    //art_tree t2;
+    //int res2 = art_tree_init(&t2);
+    //fail_unless(res2 == 0);
+    //start = clock();
+    //art_recover(&t2, &t);
+    //finish = clock();
+    //duration = (double)(finish - start) / CLOCKS_PER_SEC;
+    //printf( "WOART rebuild spends %f seconds\n", duration );
+
+
+
+
+
+
+    // Search for each line
+    fseek(f, 0, SEEK_SET);
+    line = 1;
+    start = clock();
+    while (fgets(buf, sizeof buf, f)) {
+        len = strlen(buf);
+        buf[len-1] = '\0';
+
+        uint64_t *val = (uint64_t*)art_search(&t, (unsigned char*)buf, len);
+	
+        //if (fail_unless(line == *val))
+        //{
+        //   printf("Line: %d Val: %" PRIuPTR " Str: %s\n", line,
+        //           val, buf);
+        //}
+	
         line++;
     }
     finish = clock();
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
-    printf( "%WOART Insert spends %f seconds\n", duration );
+    printf( "RART search spends %f seconds\n", duration );
 
-    // Seek back to the start
+   // Updates
+	/*
     fseek(f, 0, SEEK_SET);
-
-    // Search for each line
     line = 1;
     start = clock();
-/*    while (fgets(buf, sizeof buf, f)) {
+    while (fgets(buf, sizeof buf, f)) {
+        len = strlen(buf);
+        buf[len-1] = '\0';
+        fail_unless(NULL ==
+                    art_insert(&t, (unsigned char*)buf, len, &line));
+        line++;
+    }
+    nlines = line - 1;
+    finish = clock();
+    duration = (double)(finish - start) / CLOCKS_PER_SEC;
+    printf( "RART update spends %f seconds\n", duration );
+*/
+    test_art_update(&t, f);
+
+
+    start = clock();
+    // Check the minimum
+    art_leaf *l = art_minimum(&t);
+    fail_unless(l && strcmp((char*)l->key, "A") == 0);
+    // Check the maximum
+    l = art_maximum(&t);
+    fail_unless(l && strcmp((char*)l->key, "zythum") == 0);
+    finish = clock();
+    duration = (double)(finish - start) / CLOCKS_PER_SEC;
+    printf( "RART delete spends %f seconds\n", duration );
+
+    // delete
+    line = 1;
+    fseek(f, 0, SEEK_SET);
+    start = clock();
+    uintptr_t val;
+    while (fgets(buf, sizeof buf, f)) {
         len = strlen(buf);
         buf[len-1] = '\0';
 
-        uintptr_t val = (uintptr_t)art_search(&t, (unsigned char*)buf, len);
-        if (fail_unless(line == val))
+ 
+        // Delete, should get lineno back
+	art_delete(&t, (unsigned char*)buf, len);
+        //val = (uintptr_t)art_delete(&t, (unsigned char*)buf, len);
+        //fail_unless(line == val);
+
+        // Check the size
+        //fail_unless(art_size(&t) == nlines - line);
+        line++;
+    }
+    finish = clock();
+    duration = (double)(finish - start) / CLOCKS_PER_SEC;
+    printf( "RART find max/min spends %f seconds\n", duration );
+
+
+    res = art_tree_destroy(&t);
+    fail_unless(res == 0);
+
+}
+int test_range_query(art_tree *t, int n)
+{
+    clock_t start, finish;
+    long double duration;
+    start = clock();
+    //unsigned char key[] = {"opt\0"};
+    unsigned char key[ ]={"1010000\0"};
+    uint32_t key_len;
+    art_leaf *current_leaf =  art_search_leaf(t, (unsigned char*)key, 8);
+    for (int i = 0; i < n; i++)
+    {
+        current_leaf = current_leaf->next;
+        key_len = current_leaf->key_len;
+    }
+    finish = clock();
+    duration = (double)(finish - start) / CLOCKS_PER_SEC;
+    printf("clock per sec is %ld\n",CLOCKS_PER_SEC);
+    printf("clock cycle is %d\n",finish - start);
+    printf( "ART range query spends %f seconds\n", duration );
+
+}
+
+
+
+
+int test_art_rebuild(filename)
+{
+    art_tree t;
+    clock_t start, finish;
+    double duration;
+    int res = art_tree_init(&t);
+    fail_unless(res == 0);
+
+    int len;
+    char buf[512];
+    FILE *f = fopen(filename, "r");
+
+    uint64_t line = 1;
+    start = clock();
+    while (fgets(buf, sizeof buf, f)) {
+        len = strlen(buf);
+        buf[len-1] = '\0';
+	/*
+        fail_unless(NULL ==
+                    art_insert(&t, (unsigned char*)buf, len, &line));*/
+	art_insert(&t, (unsigned char*)buf, len, &line);
+        line++;
+    }
+    uint64_t nlines = line - 1;
+    finish = clock();
+    duration = (double)(finish - start) / CLOCKS_PER_SEC;
+    printf( "RART Insert spends %f seconds\n", duration );
+    // Seek back to the start
+    fseek(f, 0, SEEK_SET);
+
+   art_tree t_recover;
+   res = art_tree_init(&t);
+   line = 1;
+    start = clock();
+    while (fgets(buf, sizeof buf, f)) {
+        len = strlen(buf);
+        buf[len-1] = '\0';
+
+        uint64_t *val = (uint64_t*)art_search(&t, (unsigned char*)buf, len);
+	/*
+        if (fail_unless(line == *val))
         {
             printf("Line: %d Val: %" PRIuPTR " Str: %s\n", line,
                    val, buf);
         }
-
+	*/
         line++;
     }
-*/
     finish = clock();
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
-    printf( "%WOART search spends %f seconds\n", duration );
+    printf( "RART search spends %f seconds\n", duration );
 
+   // Updates
+    fseek(f, 0, SEEK_SET);
+    line = 1;
+    start = clock();
+    while (fgets(buf, sizeof buf, f)) {
+        len = strlen(buf);
+        buf[len-1] = '\0';
+        fail_unless(NULL ==
+                    art_insert(&t, (unsigned char*)buf, len, &line));
+        line++;
+    }
+    nlines = line - 1;
+    finish = clock();
+    duration = (double)(finish - start) / CLOCKS_PER_SEC;
+    printf( "RART update spends %f seconds\n", duration );
 
-    // Check the minimum
-    art_leaf *l = art_minimum(&t);
-    fail_unless(l && strcmp((char*)l->key, "A") == 0);
-
-    // Check the maximum
-    l = art_maximum(&t);
-    fail_unless(l && strcmp((char*)l->key, "zythum") == 0);
-
-    res = art_tree_destroy(&t);
-    fail_unless(res == 0);
 }
 
 int test_art_insert_delete()
 {
-    printf("start test_art_insert_delete\n");
     art_tree t;
     int res = art_tree_init(&t);
     fail_unless(res == 0);
@@ -233,7 +460,6 @@ int iter_cb(void *data, const unsigned char* key, uint32_t key_len, void *val) {
 
 int test_art_insert_iter()
 {
-    printf("start test_art_insert_iter\n");
     art_tree t;
     int res = art_tree_init(&t);
     fail_unless(res == 0);
@@ -266,15 +492,20 @@ int test_art_insert_iter()
 }
 
 
-int main(void) {
+int main(int argc, char **argv) {
     clock_t start, finish;
     double duration;
     start = clock();
-
-    printf("start main() of art_test\n");
+    char * p;
+    char * filename = argv[1];
+    int conv = (int)strtol(argv[2], &p, 10);
+    extra_latency = conv;
+    //printf("conv is %d", conv);
+    //test_flush_latency();
     //test_art_insert();
     //test_art_insert_verylong();
-    test_art_insert_search();
+    test_art_insert_search(filename);
+    //test_art_rebuild(filenames)
     //test_art_insert_delete();
     //test_art_insert_iter();
 
@@ -282,3 +513,4 @@ int main(void) {
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
     printf( "%f seconds\n", duration );
 }
+

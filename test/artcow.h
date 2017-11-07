@@ -11,21 +11,6 @@ extern "C" {
 #define NODE48  3
 #define NODE256 4
 
-#define INSLOG 0
-#define DELLOG 1
-
-/**
- * define several states
- * UNATOMIC:Initial states
- * UNCOMMIT: log change has benn persistent
- * COMMIY: leaf node has been added to the list, it's safe
- */
-#define ALLOCATED 0
-#define INITILIZED 1
-#define INLIST 2
-#define INVALID 3
-#define REMOVED 4
-
 #define MAX_PREFIX_LEN 10
 
 #if defined(__GNUC__) && !defined(__clang__)
@@ -41,11 +26,9 @@ extern "C" {
 
 typedef int(*art_callback)(void *data, const unsigned char *key, uint32_t key_len, void *value);
 
-
 /**
  * This struct is included as part
  * of all the various node sizes
- * Can be used to store prefix info
  */
 typedef struct {
     uint8_t type;
@@ -94,58 +77,19 @@ typedef struct {
  * Represents a leaf. These are
  * of arbitrary size, as they include the key.
  */
-typedef struct art_leaf art_leaf;
-struct art_leaf{
-    art_leaf *next;
-    art_leaf *prev;
+typedef struct {
     void *value;
-    //add a status to indicates the status of a leaf node
-    //0
-    //1
-    uint32_t status;
     uint32_t key_len;
-    unsigned char key[24];
-};
-
-
-/**
- * Wen Pan
- *log structure for purpose of atomicity & preventing memory leak
- * Types are INSLOG & DELLOG*/
-typedef struct art_log art_log;
-struct art_log {
-    art_leaf *leaf;
-    art_log *next;
-};
-
-
+    unsigned char key[];
+} art_leaf;
 
 /**
  * Main struct, points to root.
  */
 typedef struct {
     art_node *root;
-    art_leaf *leaf_head;
-    art_log *log_head;
     uint64_t size;
 } art_tree;
-
-
-typedef struct{
-    unsigned char * bitmap;
-    void *mem_chunk;
-    void * next;
-}meta_node;
-
-typedef struct{
-    meta_node * leaf_chunk_head;
-    meta_node * curr_leaf_chunk;
-    art_leaf  *leaf_recycle_list;
-
-    meta_node * log_chunk_head;
-    meta_node * curr_log_chunk;
-    art_log * log_recycle_list;
-}alloc_meta;
 
 /**
  * Initializes an ART tree
@@ -183,8 +127,7 @@ inline uint64_t art_size(art_tree *t) {
     return t->size;
 }
 #endif
-art_leaf* art_search_leaf(const art_tree *t, const unsigned char *key, int key_len);
-void* art_recover(art_tree *t, art_tree *old_T);
+
 /**
  * Inserts a new value into the ART tree
  * @arg t The tree
@@ -194,7 +137,7 @@ void* art_recover(art_tree *t, art_tree *old_T);
  * @return NULL if the item was newly inserted, otherwise
  * the old value pointer is returned.
  */
-void* art_insert(art_tree *t, const unsigned char *key, int key_len, uint64_t *value);
+void* art_insert(art_tree *t, const unsigned char *key, int key_len, void *value);
 
 /**
  * Deletes a value from the ART tree
@@ -204,7 +147,7 @@ void* art_insert(art_tree *t, const unsigned char *key, int key_len, uint64_t *v
  * @return NULL if the item was not found, otherwise
  * the value pointer is returned.
  */
-int art_delete(art_tree *t, const unsigned char *key, int key_len);
+void* art_delete(art_tree *t, const unsigned char *key, int key_len);
 
 /**
  * Searches for a value in the ART tree
@@ -259,6 +202,3 @@ int art_iter_prefix(art_tree *t, const unsigned char *prefix, int prefix_len, ar
 #endif
 
 #endif
-
-
-

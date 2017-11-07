@@ -1,12 +1,12 @@
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <time.h>
+#include <stdio.h>
 #include <assert.h>
-#include "woart.h"
-#include "flush_delay.h"
+#include "artcow.h"
 #include "../src/lib/pmalloc.h"
+#include "flush_delay.h"
+
 #ifdef __i386__
 #include <emmintrin.h>
 #else
@@ -16,75 +16,40 @@
 #endif
 
 
-#define LEAF_NODE (0)
-#define LOG_NODE (1)
-#define MAX_KEY_LEN (25)
-#define VALUE_SIZE (4)
-#define PM_NODE_TYPES (2)
-
-#define LOG_MODE (0)
-
-
 /**
  * Macros to manipulate pointer tags
- * Set last bit to 1 to identify a pointer to a LEAF
- * *********************************************************************
- * uintptr_t： an unsigned integer type with the property that any valid
- *  pointer to void can be converted to this type, then converted back
- *  to pointer to void, and the result will compare equal to the
- * original pointer
  */
 #define IS_LEAF(x) (((uintptr_t)x & 1))
 #define SET_LEAF(x) ((void*)((uintptr_t)x | 1))
 #define LEAF_RAW(x) ((art_leaf*)((void*)((uintptr_t)x & ~1)))
+#define CACHELINE_SIZE (64)
 
 
+int COW = 1;
 /**********************************************************************
  * ********   pmalloc() and pfree() wrap psedo code  ******************
  */
 /*
+
 void* pmalloc (size_t size){
     return malloc(size);
 }
 
-void pfree (void *ptr, size_t size) {
+void pfree (void *ptr, size_t size){
     return free(ptr);
-}
-*/
+}*/
 
-
-void test_flush_latency()
+void *custom_calloc(size_t n, size_t size)
 {
-    clock_t start, stop;
-    start = clock();
-    double duration;
-    uint64_t *a = (uint64_t*)pmalloc(sizeof(uint64_t)*10000);
-    start = clock();
-    for (int i = 0; i < 10000; i++)
-    {
-	a[i] = i*i;
-        _mm_clflush(a+i);
-    }
-    
-    stop = clock();
-    duration = (double)(stop - start) / CLOCKS_PER_SEC;
-    printf("Flush latency latency is :%f", duration);
-    printf("Flush latency latency is :%f", duration);
-    pfree(a, sizeof(uint64_t)*10000);
-    //free(a);
+    size_t total = n * size;
+    void *p = pmalloc(total);
+
+    if (!p) return NULL;
+
+    return memset(p, 0, total);
 }
 
 
-/* Slab allocation implementation
- * input: allocation type
- * return: a single data structure space*/
-alloc_meta * tree_alloc_meta = NULL;
-
-
-
-/**********************************************************************
-********       art data structure code start here    *****************
-**********************************************************************/
 /**
  * Allocates a node of the given type,
  * initializes to zero and sets the type.
@@ -93,23 +58,16 @@ static art_node* alloc_node(uint8_t type) {
     art_node* n;
     switch (type) {
         case NODE4:
-            n = (art_node*)pmalloc(sizeof(art_node4));
-            memset(n, 0, sizeof(art_node4));
-            //change for WOART
-            //((art_node4*)n)->keys_slot = (unsigned char *)pmalloc(sizeof(unsigned char)*8);
-            //memset(((art_node4*)n)->keys_slot, 0, sizeof(unsigned char)*8);
+            n = (art_node*)custom_calloc(1, sizeof(art_node4));
             break;
         case NODE16:
-            n = (art_node*)pmalloc(sizeof(art_node16));
-            memset(n, 0, sizeof(art_node16));
+            n = (art_node*)custom_calloc(1, sizeof(art_node16));
             break;
         case NODE48:
-            n = (art_node*)pmalloc(sizeof(art_node48));
-            memset(n, 0, sizeof(art_node48));
+            n = (art_node*)custom_calloc(1, sizeof(art_node48));
             break;
         case NODE256:
-            n = (art_node*)pmalloc(sizeof(art_node256));
-            memset(n, 0, sizeof(art_node256));
+            n = (art_node*)custom_calloc(1, sizeof(art_node256));
             break;
         default:
             abort();
@@ -121,34 +79,23 @@ static art_node* alloc_node(uint8_t type) {
 /**
  * Initializes an ART tree
  * @return 0 on success.
- * fixme: log_head point to a log type with no data
  */
 int art_tree_init(art_tree *t) {
     t->root = NULL;
-    t->leaf_head = NULL;
-
-    art_log * head;
-    head = (art_log *)malloc(sizeof(art_log));
-    if (head==NULL)
-        return 0;
-    head->next = NULL;
-    head->leaf = NULL;
-
-    t->log_head = head;
-
     t->size = 0;
-    printf("init return 0");
     return 0;
 }
 
 // Recursively destroys the tree
 static void destroy_node(art_node *n) {
+    art_leaf *l;
     // Break if null
     if (!n) return;
 
     // Special case leafs
     if (IS_LEAF(n)) {
-        pfree(LEAF_RAW(n), sizeof(art_node));
+        l = (art_leaf *)LEAF_RAW(n);
+        pfree(LEAF_RAW(n), sizeof(art_leaf) + l->key_len);
         return;
     }
 
@@ -163,17 +110,14 @@ static void destroy_node(art_node *n) {
     switch (n->type) {
         case NODE4:
             p.p1 = (art_node4*)n;
-            //FOR WOART, need to free slot array space
-            //pfree(p.p1->keys_slot, sizeof(unsigned char)*8);
             for (i=0;i<n->num_children;i++) {
                 destroy_node(p.p1->children[i]);
             }
-
             break;
 
         case NODE16:
             p.p2 = (art_node16*)n;
-            for (i=0;i<n->num_children;i++)  {
+            for (i=0;i<n->num_children;i++) {
                 destroy_node(p.p2->children[i]);
             }
             break;
@@ -196,21 +140,14 @@ static void destroy_node(art_node *n) {
         default:
             abort();
     }
-
-    // Free ourself on the way up
-    pfree(n, sizeof(art_node));
 }
-
-
 
 /**
  * Destroys an ART tree
  * @return 0 on success.
  */
 int art_tree_destroy(art_tree *t) {
-    printf("Destory node\n");
     destroy_node(t->root);
-    t->leaf_head = NULL;
     return 0;
 }
 
@@ -237,28 +174,15 @@ static art_node** find_child(art_node *n, unsigned char c) {
                 /* this cast works around a bug in gcc 5.1 when unrolling loops
                  * https://gcc.gnu.org/bugzilla/show_bug.cgi?id=59124
                  */
-                /* For WOART*/
-                if (((unsigned char*)p.p1->keys_slot)[i] == c)
-                {
-                    int idx = ((unsigned char*)p.p1->keys_slot)[i + 4];
-                    return &p.p1->children[idx];
-                }
-
+                if (((unsigned char*)p.p1->keys)[i] == c)
+                    return &p.p1->children[i];
             }
             break;
 
             {
                 case NODE16:
                     p.p2 = (art_node16*)n;
-                /*****************************
-                 * WOART didn't sort the keys/pointers
-                 * Need a sqeuential search*/
-                for (i = 0; i < n->num_children; i++)
-                {
-                    if(p.p2->keys[i] == c)
-                        return &p.p2->children[i];
-                }
-/*
+
                 // support non-86 architectures
 #ifdef __i386__
                 // Compare the key to all 16 stored keys
@@ -274,7 +198,7 @@ static art_node** find_child(art_node *n, unsigned char c) {
                 // Compare the key to all 16 stored keys
                 __m128i cmp;
                 cmp = _mm_cmpeq_epi8(_mm_set1_epi8(c),
-                                     _mm_loadu_si128((__m128i*)p.p2->keys));
+                        _mm_loadu_si128((__m128i*)p.p2->keys));
 
                 // Use a mask to ignore children that don't exist
                 mask = (1 << n->num_children) - 1;
@@ -292,15 +216,14 @@ static art_node** find_child(art_node *n, unsigned char c) {
                 bitfield &= mask;
 #endif
 #endif
-*/
+
                 /*
                  * If we have a match (any bit set) then we can
                  * return the pointer match using ctz to get
                  * the index.
                  */
-                /*
                 if (bitfield)
-                    return &p.p2->children[__builtin_ctz(bitfield)];*/
+                    return &p.p2->children[__builtin_ctz(bitfield)];
                 break;
             }
 
@@ -460,30 +383,19 @@ art_leaf* art_maximum(art_tree *t) {
     return maximum((art_node*)t->root);
 }
 
-
-static art_leaf* make_leaf(art_log **log_head, const unsigned char *key, int key_len, void *value) {
-    art_leaf *l = (art_leaf*)pmalloc(sizeof(art_leaf)+key_len);
+static art_leaf* make_leaf(const unsigned char *key, int key_len, void *value) {
+    art_leaf *l = (art_leaf*)custom_calloc(1, sizeof(art_leaf)+key_len);
     l->value = (void *)pmalloc(sizeof(uint64_t));
     memcpy(l->value, value, sizeof(uint64_t));
     persistent(l->value, sizeof(uint64_t), 1);
 
     memcpy(l->key, key, key_len);
-    persistent(l->key, MAX_KEY_LEN,1);
+    persistent(l->key, key_len,1);
     l->key_len = key_len;
     persistent(&(l->key_len), sizeof(uint32_t),1);
     return l;
 }
 
-/**
- * l1:abcdefg hkkfvk
- * l2:ssddefg hkklva
- * 			 ^
- * 			 |
- * 			depth
- *
- * compare start at depth, find common prefix
- * return the length of common prefix
- * */
 static int longest_common_prefix(art_leaf *l1, art_leaf *l2, int depth) {
     int max_cmp = min(l1->key_len, l2->key_len) - depth;
     int idx;
@@ -505,44 +417,62 @@ static void copy_header(art_node *dest, art_node *src) {
 
 static void add_child256(art_node256 *n, art_node **ref, unsigned char c, void *child) {
     (void)ref;
+
+    art_node256 ** temp_pointer = (art_node256**) pmalloc(sizeof(art_node256*));
+    art_node256 * bak = (art_node256 *)alloc_node(NODE256);
+    *temp_pointer = bak;
+    persistent(temp_pointer, sizeof(art_node256*), 1);
+    memcpy(bak, n, sizeof(art_node256));
+    persistent(bak, sizeof(art_node256), 1);   
+
+    
     n->children[c] = (art_node*)child;
-    persistent(&(n->children[c]), sizeof(art_node *), 2);
+    persistent(&(n->children[c]), sizeof(unsigned char), 1);
     n->n.num_children++;
     persistent(&(n->n.num_children), sizeof(uint8_t), 1);
 
+    pfree(bak, sizeof(art_node256));
+    pfree(temp_pointer, sizeof(art_node256*));
 }
 
 static void add_child48(art_node48 *n, art_node **ref, unsigned char c, void *child) {
     if (n->n.num_children < 48) {
         int pos = 0;
+        art_node48 ** temp_pointer = (art_node48**) pmalloc(sizeof(art_node256*));
+        art_node48 * bak = (art_node48 *)alloc_node(NODE48);
+        *temp_pointer = bak;
+        persistent(temp_pointer, sizeof(art_node48*), 1);
+        memcpy(bak, n, sizeof(art_node48));
+        persistent(bak, sizeof(art_node48), 1);
+       
+
         while (n->children[pos]) pos++;
         n->children[pos] = (art_node*)child;
-        persistent(n->children[pos], sizeof(art_node *), 2);
+        persistent(&(n->children[pos]), sizeof(art_node*), 1);
         n->keys[c] = pos + 1;
-        persistent(&(n->keys[c]), sizeof(char), 1);
+        persistent(&(n->keys[c]), sizeof(unsigned char), 1);
         n->n.num_children++;
         persistent(&(n->n.num_children), sizeof(uint8_t), 1);
+
+        pfree(bak, sizeof(art_node48));
+        pfree(temp_pointer, sizeof(art_node48*));
     } else {
         art_node256 *new_node = (art_node256*)alloc_node(NODE256);
         for (int i=0;i<256;i++) {
             if (n->keys[i]) {
                 new_node->children[i] = n->children[n->keys[i] - 1];
-                persistent(&(new_node->children[i]), sizeof(art_node *), 2);
             }
         }
         copy_header((art_node*)new_node, (art_node*)n);
         *ref = (art_node*)new_node;
         pfree(n, sizeof(art_node48));
         add_child256(new_node, ref, c, child);
+        persistent(new_node, sizeof(art_node256), 1);
     }
 }
 
 static void add_child16(art_node16 *n, art_node **ref, unsigned char c, void *child) {
     if (n->n.num_children < 16) {
-        /***************************************
-         * WOART use append only method, no need to sort/
-
-        /*
         unsigned mask = (1 << n->n.num_children) - 1;
 
         // support non-x86 architectures
@@ -559,47 +489,55 @@ static void add_child16(art_node16 *n, art_node **ref, unsigned char c, void *ch
 #ifdef __amd64__
         __m128i cmp;
 
-        // Compare the key to all 16 stored keys
-        cmp = _mm_cmplt_epi8(_mm_set1_epi8(c),
-                             _mm_loadu_si128((__m128i*)n->keys));
-
-        // Use a mask to ignore children that don't exist
-        unsigned bitfield = _mm_movemask_epi8(cmp) & mask;
-#else
-        // Compare the key to all 16 stored keys
-            unsigned bitfield = 0;
-            for (short i = 0; i < 16; ++i) {
-                if (c < n->keys[i])
-                    bitfield |= (1 << i);
-            }
+            // Compare the key to all 16 stored keys
+            cmp = _mm_cmplt_epi8(_mm_set1_epi8(c),
+                    _mm_loadu_si128((__m128i*)n->keys));
 
             // Use a mask to ignore children that don't exist
-            bitfield &= mask;
+            unsigned bitfield = _mm_movemask_epi8(cmp) & mask;
+#else
+        // Compare the key to all 16 stored keys
+        unsigned bitfield = 0;
+        for (short i = 0; i < 16; ++i) {
+            if (c < n->keys[i])
+                bitfield |= (1 << i);
+        }
+
+        // Use a mask to ignore children that don't exist
+        bitfield &= mask;
 #endif
 #endif
 
         // Check if less than any
         unsigned idx;
         if (bitfield) {
-            // determines the count of trailing zero in the binary representation of a number.
             idx = __builtin_ctz(bitfield);
+
+            art_node16 ** temp_pointer = (art_node16**) pmalloc(sizeof(art_node16*));
+            art_node16 * bak = (art_node16 *)alloc_node(NODE16);
+            *temp_pointer = bak;
+            persistent(temp_pointer, sizeof(art_node16*), 1);
+            memcpy(bak, n, sizeof(art_node16));
+            persistent(bak, sizeof(art_node16), 1);
+ 
             memmove(n->keys+idx+1,n->keys+idx,n->n.num_children-idx);
             memmove(n->children+idx+1,n->children+idx,
                     (n->n.num_children-idx)*sizeof(void*));
+
+            pfree(bak, sizeof(art_node16));
+            pfree(temp_pointer, sizeof(art_node16*));
+
         } else
-         */
-        unsigned  idx;
-        idx = n->n.num_children;
+            idx = n->n.num_children;
 
         // Set the child
         n->keys[idx] = c;
+        persistent(&(n->keys[idx]), sizeof(unsigned char),0);
         n->children[idx] = (art_node*)child;
-        PERSISTENT_BARRIER();
-        persistent(&(n->keys[idx]), sizeof(char), 0);
-        persistent(&(n->children[idx]), sizeof(art_node *), 1);
+        persistent(&(n->children[idx]), sizeof(art_node *),1);
         n->n.num_children++;
-        PERSISTENT_BARRIER();
         persistent(&(n->n.num_children), sizeof(uint8_t), 1);
+
     } else {
         art_node48 *new_node = (art_node48*)alloc_node(NODE48);
 
@@ -613,83 +551,56 @@ static void add_child16(art_node16 *n, art_node **ref, unsigned char c, void *ch
         *ref = (art_node*)new_node;
         pfree(n, sizeof(art_node16));
         add_child48(new_node, ref, c, child);
+        persistent(new_node, sizeof(art_node48),1);
     }
 }
 
-/*keys are sorted*/
 static void add_child4(art_node4 *n, art_node **ref, unsigned char c, void *child) {
-    int idx1, idx2;
     if (n->n.num_children < 4) {
-        idx1 = n->n.num_children;
-
-        n->children[idx1] = (art_node*)child;
-
-        /*WOART insert key and children in a append-only manner*/
-        PERSISTENT_BARRIER();
-        persistent(&(n->children[idx1]), sizeof(art_node *),1);
-
-        for (idx2=0; idx2 < n->n.num_children; idx2++) {
-            if (c < n->keys_slot[idx2]) break;
+        int idx;
+        for (idx=0; idx < n->n.num_children; idx++) {
+            if (c < n->keys[idx]) break;
         }
-        unsigned char tmp_keys_slot[8];
-	memcpy(tmp_keys_slot, n->keys_slot, sizeof(tmp_keys_slot));
-        /*for (int i = 0; i < 8; ++i) {
-            tmp_keys_slot[i] = n->keys_slot[i];
-        }*/
+        //Only add Cpoy_on_write cost, ignore pointer switch cost
+        //THIS IS NOT REAL COW!!!
+
+        art_node4 ** temp_pointer = (art_node4**) pmalloc(sizeof(art_node4*));
+        art_node4 * bak = (art_node16 *)alloc_node(NODE4);
+        *temp_pointer = bak;
+        persistent(temp_pointer, sizeof(art_node4*), 1);
+        memcpy(bak, n, sizeof(art_node16));
+        persistent(bak, sizeof(art_node16), 1);
 
         // Shift to make room
-        //memmove()) is a safe version of memcpy()
-        //shifting both keys and pointers to the right
-        memmove(tmp_keys_slot+idx2+1, tmp_keys_slot+idx2, n->n.num_children - idx2);
-        memmove(tmp_keys_slot+idx2+1+4, tmp_keys_slot+idx2+4, n->n.num_children - idx2);
-        tmp_keys_slot[idx2] = c;
-        tmp_keys_slot[idx2 + 4] = (unsigned char)(idx1);
-        //pfree(n->keys_slot, sizeof(unsigned char)*8);
-        //n->keys_slot = tmp_keys_slot;
-	memcpy(n->keys_slot, tmp_keys_slot, sizeof(tmp_keys_slot));
-        PERSISTENT_BARRIER();
-        /*
-        char tmp;
-        for (int i = 0; i < 8; ++i) {
-            tmp = n->keys_slot[i];
-        }
-        */
-        persistent(n->keys_slot, sizeof(char)*8,1);
+        memmove(n->keys+idx+1, n->keys+idx, n->n.num_children - idx);
+        memmove(n->children+idx+1, n->children+idx,
+                (n->n.num_children - idx)*sizeof(void*));
+
+        // Insert element
+        n->keys[idx] = c;
+        persistent(&(n->keys[idx]), sizeof(unsigned char), 1);
+        n->children[idx] = (art_node*)child;
+        persistent(&( n->children[idx]), sizeof(art_node *), 1);
+        persistent(&( n->children[idx]), sizeof(art_node *), 1);
         n->n.num_children++;
-//        memmove(n->children+idx+1, n->children+idx,
-//                (n->n.num_children - idx)*sizeof(void*));
-//
-//        // Insert element
-//        n->keys[idx] = c;
-//        n->children[idx] = (art_node*)child;
-//        n->n.num_children++;
+        persistent(&(n->n.num_children), sizeof(uint8_t), 1);
+
+        pfree(bak, sizeof(art_node4));
+        pfree(temp_pointer, sizeof(art_node4*));
 
     } else {
         art_node16 *new_node = (art_node16*)alloc_node(NODE16);
 
         // Copy the child pointers and the key map
-
         memcpy(new_node->children, n->children,
                sizeof(void*)*n->n.num_children);
-        /*******************************************
-          *FOR WOART: need to change the order of children
-          * Or the order of keys
-          */
-        int idx;
-        for (int i = 0; i < n->n.num_children; i++)
-        {
-            idx = n->keys_slot[i+4];
-            new_node->keys[idx] = n->keys_slot[i];
-        }
-//        memcpy(new_node->keys, n->keys_slot,
-//               sizeof(unsigned char)*n->n.num_children);
+        memcpy(new_node->keys, n->keys,
+               sizeof(unsigned char)*n->n.num_children);
         copy_header((art_node*)new_node, (art_node*)n);
         *ref = (art_node*)new_node;
-        //pfree(n->keys_slot, sizeof(unsigned char)*8);
-        //n->keys_slot = NULL;
         pfree(n, sizeof(art_node4));
-        n = NULL;
         add_child16(new_node, ref, c, child);
+        persistent(new_node, sizeof(art_node16),1);
     }
 }
 
@@ -710,8 +621,6 @@ static void add_child(art_node *n, art_node **ref, unsigned char c, void *child)
 
 /**
  * Calculates the index at which the prefixes mismatch
- * Specificilly. When no match found, return 0;
- * Which means when partial_len == 0, this is not a compressed node
  */
 static int prefix_mismatch(const art_node *n, const unsigned char *key, int key_len, int depth) {
     int max_cmp = min(min(MAX_PREFIX_LEN, n->partial_len), key_len - depth);
@@ -723,8 +632,7 @@ static int prefix_mismatch(const art_node *n, const unsigned char *key, int key_
 
     // If the prefix is short we can avoid finding a leaf
     if (n->partial_len > MAX_PREFIX_LEN) {
-        // Prefix is longer than what we've checked, find a min leaf l
-        //and get  the prefix of key and l
+        // Prefix is longer than what we've checked, find a leaf
         art_leaf *l = minimum(n);
         max_cmp = min(l->key_len, key_len)- depth;
         for (; idx < max_cmp; idx++) {
@@ -735,39 +643,10 @@ static int prefix_mismatch(const art_node *n, const unsigned char *key, int key_
     return idx;
 }
 
-
-/**
- * Insert a leaf node into the double-linked-list
- * The operation is atomic safe
- * fixme: has to add mechanism to prevent persistent memory leak*/
-static void linklist_insert(art_log *log_head, art_leaf **leaf_header, art_leaf *node)
-{
-    /***********************
-     * WOART don't use this*/
-    return;
-}
-
-
-/** n: the tree the are insert to
- * ref: the tree node that has index to the inserted node n
- * key, key_len, value: you know it
- * depth: current depth
- * old: a flag incicates we find an existing leaf and update it
- * return value: pointer to old_val when update is performaned (
- * find same key already exists in the radix tree)
- * return 0 when create a new node
- * */
-static void* recursive_insert(art_tree *t, art_node *n, art_node **ref,
-                              art_leaf **leaf_header, art_log **log_header,
-                              const unsigned char *key, int key_len, void *value, int depth, int *old) {
+static void* recursive_insert(art_node *n, art_node **ref, const unsigned char *key, int key_len, void *value, int depth, int *old) {
     // If we are at a NULL node, inject a leaf
-    art_node *tmp;
     if (!n) {
-        tmp = (art_node*)SET_LEAF(make_leaf(log_header, key, key_len, value));
-        // leaf_header = LEAF_RAW (*ref);
-        // fixme: need to prevent memory leak
-        linklist_insert(*log_header, leaf_header, LEAF_RAW (tmp));
-        *ref = tmp;
+        *ref = (art_node*)SET_LEAF(make_leaf(key, key_len, value));
         return NULL;
     }
 
@@ -775,9 +654,8 @@ static void* recursive_insert(art_tree *t, art_node *n, art_node **ref,
     if (IS_LEAF(n)) {
         art_leaf *l = LEAF_RAW(n);
 
-        // Check if we are updating an existing value, depth not used
-        // fixme: use delete + insert to update a existing leaf
-        // leaf_matches() returns 0 when match
+        // Check if we are updating an existing value
+        //For COW, we don't need to do COW since l only update a pointer
         if (!leaf_matches(l, key, key_len, depth)) {
             void * new_value = (void *) pmalloc(sizeof(uint64_t));
             pfree(l->value, sizeof(uint64_t));
@@ -786,24 +664,22 @@ static void* recursive_insert(art_tree *t, art_node *n, art_node **ref,
             persistent(l->value, sizeof(uint64_t), 1);
             *old = 1;
             return NULL;
+
         }
 
-        // New key, we must split the leaf into a node4
+        // New value, we must split the leaf into a node4
         art_node4 *new_node = (art_node4*)alloc_node(NODE4);
 
         // Create a new leaf
-        art_leaf *l2 = make_leaf(log_header, key, key_len, value);
+        art_leaf *l2 = make_leaf(key, key_len, value);
 
         // Determine longest prefix
         int longest_prefix = longest_common_prefix(l, l2, depth);
-        //In a compressed node, partial_len is set to be prefix length
         new_node->n.partial_len = longest_prefix;
         memcpy(new_node->n.partial, key+depth, min(MAX_PREFIX_LEN, longest_prefix));
         // Add the leafs to the new node4
         *ref = (art_node*)new_node;
         add_child4(new_node, ref, l->key[depth+longest_prefix], SET_LEAF(l));
-        //Wen Pan: insert into linked list
-        linklist_insert(*log_header, leaf_header, l2);
         add_child4(new_node, ref, l2->key[depth+longest_prefix], SET_LEAF(l2));
         return NULL;
     }
@@ -811,15 +687,13 @@ static void* recursive_insert(art_tree *t, art_node *n, art_node **ref,
     // Check if given node has a prefix
     if (n->partial_len) {
         // Determine if the prefixes differ, since we need to split
-        // Calculates the index at which the prefixes mismatch
         int prefix_diff = prefix_mismatch(n, key, key_len, depth);
-        //which means there are child nodes, still need to compare
         if ((uint32_t)prefix_diff >= n->partial_len) {
             depth += n->partial_len;
             goto RECURSE_SEARCH;
         }
 
-        // Create a new inner node, which contains the common parts (prefix)
+        // Create a new node
         art_node4 *new_node = (art_node4*)alloc_node(NODE4);
         *ref = (art_node*)new_node;
         new_node->n.partial_len = prefix_diff;
@@ -840,9 +714,7 @@ static void* recursive_insert(art_tree *t, art_node *n, art_node **ref,
         }
 
         // Insert the new leaf
-        art_leaf *l = make_leaf(log_header, key, key_len, value);
-        //Wen Pan: insert into linked list
-        linklist_insert(*log_header, leaf_header, LEAF_RAW (l));
+        art_leaf *l = make_leaf(key, key_len, value);
         add_child4(new_node, ref, key[depth+prefix_diff], SET_LEAF(l));
         return NULL;
     }
@@ -852,14 +724,11 @@ static void* recursive_insert(art_tree *t, art_node *n, art_node **ref,
     // Find a child to recurse to
     art_node **child = find_child(n, key[depth]);
     if (child) {
-        return recursive_insert(t,*child, child,leaf_header, log_header,
-                                key, key_len, value, depth+1, old);
+        return recursive_insert(*child, child, key, key_len, value, depth+1, old);
     }
 
     // No child, node goes within us
-    art_leaf *l = make_leaf(log_header, key, key_len, value);
-    //Wen Pan: insert into linked list
-    linklist_insert(*log_header, leaf_header, LEAF_RAW (l));
+    art_leaf *l = make_leaf(key, key_len, value);
     add_child(n, ref, key[depth], SET_LEAF(l));
     return NULL;
 }
@@ -875,8 +744,7 @@ static void* recursive_insert(art_tree *t, art_node *n, art_node **ref,
  */
 void* art_insert(art_tree *t, const unsigned char *key, int key_len, void *value) {
     int old_val = 0;
-    void *old = recursive_insert(t, t->root, &t->root, &t->leaf_head,
-                                 &t->log_head, key, key_len, value, 0, &old_val);
+    void *old = recursive_insert(t->root, &t->root, key, key_len, value, 0, &old_val);
     if (!old_val) t->size++;
     return old;
 }
@@ -938,42 +806,26 @@ static void remove_child16(art_node16 *n, art_node **ref, art_node **l) {
         art_node4 *new_node = (art_node4*)alloc_node(NODE4);
         *ref = (art_node*)new_node;
         copy_header((art_node*)new_node, (art_node*)n);
-        memcpy(new_node->keys_slot, n->keys, 4);
-        for (int i = 0; i <= n->n.num_children; ++i) {
-            new_node->keys_slot[i+4] = i;
-        }
+        memcpy(new_node->keys, n->keys, 4);
         memcpy(new_node->children, n->children, 4*sizeof(void*));
         pfree(n, sizeof(art_node16));
     }
 }
 
 static void remove_child4(art_node4 *n, art_node **ref, art_node **l) {
-    //For WOART, chid pos is different from key pos
-    int child_pos = l - n->children;
-    int key_pos;
-    for (key_pos=0; key_pos<3 ; key_pos++)
-    {
-        if(n->keys_slot[4+key_pos] == child_pos)
-            break;
-    }
-    //child_pos = n->keys_slot[key_pos+4];
-    memmove(n->keys_slot+key_pos, n->keys_slot+key_pos+1, n->n.num_children - 1 - key_pos);
-    memmove(n->keys_slot+key_pos+4, n->keys_slot+key_pos+5, n->n.num_children - 1 - key_pos);
-
-    //memmove(n->children+child_pos, n->children+child_pos+1, (n->n.num_children - 1 - child_pos)*sizeof(void*));
-    //n->children[child_pos] = NULL;
+    int pos = l - n->children;
+    memmove(n->keys+pos, n->keys+pos+1, n->n.num_children - 1 - pos);
+    memmove(n->children+pos, n->children+pos+1, (n->n.num_children - 1 - pos)*sizeof(void*));
     n->n.num_children--;
 
     // Remove nodes with only a single child
     if (n->n.num_children == 1) {
-        //For WOART
-        child_pos = n->keys_slot[4];
-        art_node *child = n->children[child_pos];
+        art_node *child = n->children[0];
         if (!IS_LEAF(child)) {
             // Concatenate the prefixes
             int prefix = n->n.partial_len;
             if (prefix < MAX_PREFIX_LEN) {
-                n->n.partial[prefix] = n->keys_slot[0];
+                n->n.partial[prefix] = n->keys[0];
                 prefix++;
             }
             if (prefix < MAX_PREFIX_LEN) {
@@ -987,18 +839,10 @@ static void remove_child4(art_node4 *n, art_node **ref, art_node **l) {
             child->partial_len += n->n.partial_len + 1;
         }
         *ref = child;
-	// FIXME: if pfree n->keys_slot here, some mbind problem happens in Quartz
-        //pfree(n->keys_slot, sizeof(unsigned char) * 8);
-	//n->keys_slot = NULL;
         pfree(n, sizeof(art_node4));
     }
 }
 
-/**
- * Remove a pointer/key pair from the inner node
- * If the size of the node is shrinked into certain boundary,
- * Change the type of the node (e.g., node16->node4)
- * */
 static void remove_child(art_node *n, art_node **ref, unsigned char c, art_node **l) {
     switch (n->type) {
         case NODE4:
@@ -1014,9 +858,6 @@ static void remove_child(art_node *n, art_node **ref, unsigned char c, art_node 
     }
 }
 
-
-/**
- * return l if successfully find the leaf node*/
 static art_leaf* recursive_delete(art_node *n, art_node **ref, const unsigned char *key, int key_len, int depth) {
     // Search terminated
     if (!n) return NULL;
@@ -1059,24 +900,6 @@ static art_leaf* recursive_delete(art_node *n, art_node **ref, const unsigned ch
     }
 }
 
-/**Wen Pan: Remove a leaf from double-linkerd_list
- * Considerations:
- * 	1. Consistency
- * 	2. Recover
- *
- * A special case： leaf is the header
- * */
-int remove_leaf_from_list(art_tree *t, art_leaf *l){
-
-    return 0;
-}
-
-void *delete_log(art_tree *t,const unsigned char *key){
-    return NULL;
-
-}
-
-
 /**
  * Deletes a value from the ART tree
  * @arg t The tree
@@ -1084,10 +907,6 @@ void *delete_log(art_tree *t,const unsigned char *key){
  * @arg key_len The length of the key
  * @return NULL if the item was not found, otherwise
  * the value pointer is returned.
- *
- * fixme: after deletion, the node should be gone
- * and return an old value is no possible;
- * Thus, user program shoul dexpect a different return value of this call
  */
 void* art_delete(art_tree *t, const unsigned char *key, int key_len) {
     art_leaf *l = recursive_delete(t->root, &t->root, key, key_len, 0);
@@ -1241,5 +1060,3 @@ int art_iter_prefix(art_tree *t, const unsigned char *key, int key_len, art_call
     }
     return 0;
 }
-
-

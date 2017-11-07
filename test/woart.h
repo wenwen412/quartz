@@ -48,6 +48,7 @@ typedef int(*art_callback)(void *data, const unsigned char *key, uint32_t key_le
  * Can be used to store prefix info
  */
 typedef struct {
+    //current key is use for debug purpose
     uint8_t type;
     uint8_t num_children;
     uint32_t partial_len;
@@ -59,7 +60,11 @@ typedef struct {
  */
 typedef struct {
     art_node n;
-    unsigned char keys[4];
+    //slot array is woart part
+    //key and slot are combined together in this array
+    //first 4 chars are keys
+    // last 4 chars is slot array
+    unsigned char keys_slot[8];
     art_node *children[4];
 } art_node4;
 
@@ -68,6 +73,10 @@ typedef struct {
  */
 typedef struct {
     art_node n;
+    // For WOART:
+    //Actually the num_children info is similar to bitmap
+    //Thus, , no need for the new bitmap;
+    //unsigned char bitmap[2];
     unsigned char keys[16];
     art_node *children[16];
 } art_node16;
@@ -96,15 +105,9 @@ typedef struct {
  */
 typedef struct art_leaf art_leaf;
 struct art_leaf{
-    art_leaf *next;
-    art_leaf *prev;
     void *value;
-    //add a status to indicates the status of a leaf node
-    //0
-    //1
-    uint32_t status;
     uint32_t key_len;
-    unsigned char key[24];
+    unsigned char key[];
 };
 
 
@@ -141,7 +144,6 @@ typedef struct{
     meta_node * leaf_chunk_head;
     meta_node * curr_leaf_chunk;
     art_leaf  *leaf_recycle_list;
-
     meta_node * log_chunk_head;
     meta_node * curr_log_chunk;
     art_log * log_recycle_list;
@@ -165,7 +167,7 @@ int art_tree_init(art_tree *t);
  * @return 0 on success.
  */
 int art_tree_destroy(art_tree *t);
-
+void test_flush_latency();
 /**
  * DEPRECATED
  * Initializes an ART tree
@@ -183,8 +185,7 @@ inline uint64_t art_size(art_tree *t) {
     return t->size;
 }
 #endif
-art_leaf* art_search_leaf(const art_tree *t, const unsigned char *key, int key_len);
-void* art_recover(art_tree *t, art_tree *old_T);
+
 /**
  * Inserts a new value into the ART tree
  * @arg t The tree
@@ -194,7 +195,7 @@ void* art_recover(art_tree *t, art_tree *old_T);
  * @return NULL if the item was newly inserted, otherwise
  * the old value pointer is returned.
  */
-void* art_insert(art_tree *t, const unsigned char *key, int key_len, uint64_t *value);
+void* art_insert(art_tree *t, const unsigned char *key, int key_len, void *value);
 
 /**
  * Deletes a value from the ART tree
@@ -204,7 +205,7 @@ void* art_insert(art_tree *t, const unsigned char *key, int key_len, uint64_t *v
  * @return NULL if the item was not found, otherwise
  * the value pointer is returned.
  */
-int art_delete(art_tree *t, const unsigned char *key, int key_len);
+void * art_delete(art_tree *t, const unsigned char *key, int key_len);
 
 /**
  * Searches for a value in the ART tree

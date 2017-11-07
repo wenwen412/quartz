@@ -21,6 +21,64 @@
 #define IS_LEAF(x) (((uintptr_t)x & 1))
 #define SET_LEAF(x) ((void*)((uintptr_t)x | 1))
 #define LEAF_RAW(x) ((art_leaf*)((void*)((uintptr_t)x & ~1)))
+#define CACHELINE_SIZE (64)
+
+
+/**********************************************************************
+ * starting from here is the code to support persistent flush and
+ * memory fence
+ * check if the CPU support CLFLUSHOPT*/
+#define _mm_clflush(addr)\
+	asm volatile("clflush %0" : "+m" (*(volatile char *)(addr)))
+#define _mm_clflushopt(addr)\
+	asm volatile(".byte 0x66; clflush %0" : "+m" (*(volatile char *)(addr)))
+#define _mm_clwb(addr)\
+	asm volatile(".byte 0x66; xsaveopt %0" : "+m" (*(volatile char *)(addr)))
+#define _mm_pcommit()\
+	asm volatile(".byte 0x66, 0x0f, 0xae, 0xf8")
+
+
+
+static inline void PERSISTENT_BARRIER(void)
+{
+    asm volatile ("sfence\n" : : );
+}
+
+
+/***
+static inline bool arch_has_clwb(void)
+{
+	return static_cpu_has(X86_FEATURE_CLWB);
+}*/
+
+static inline void persistent(void *buf, uint32_t len, int fence)
+{
+    uint32_t i;
+    len = len + ((unsigned long)(buf) & (CACHELINE_SIZE - 1));
+    if(fence == 2)
+    {
+        PERSISTENT_BARRIER();
+    }
+    //semulate_latency_ns(1000);
+
+    //if (arch_has_clwb())
+    //support_clwb = 1;
+    int support_clwb = 0;
+
+    if (support_clwb) {
+        for (i = 0; i < len; i += CACHELINE_SIZE)
+                _mm_clwb(buf + i);
+    } else {
+        for (i = 0; i < len; i += CACHELINE_SIZE)
+                _mm_clflush(buf + i);
+    }
+    /* Do a fence only if asked. We often don't need to do a fence
+     * immediately after clflush because even if we get context switched
+     * between clflush and subsequent fence, the context switch operation
+     * provides implicit fence. */
+    if (fence)
+        PERSISTENT_BARRIER();
+}
 
 int COW = 1;
 /**********************************************************************
@@ -383,9 +441,14 @@ art_leaf* art_maximum(art_tree *t) {
 
 static art_leaf* make_leaf(const unsigned char *key, int key_len, void *value) {
     art_leaf *l = (art_leaf*)custom_calloc(1, sizeof(art_leaf)+key_len);
-    l->value = value;
-    l->key_len = key_len;
+    l->value = (void *)pmalloc(sizeof(uint64_t));
+    memcpy(l->value, value, sizeof(uint64_t));
+    persistent(l->value, sizeof(uint64_t), 1);
+
     memcpy(l->key, key, key_len);
+    persistent(l->key, key_len,1);
+    l->key_len = key_len;
+    persistent(&(l->key_len), sizeof(uint32_t),1);
     return l;
 }
 
@@ -411,6 +474,7 @@ static void add_child256(art_node256 *n, art_node **ref, unsigned char c, void *
 		{
 			art_node256 * bak = (art_node256 *)alloc_node(NODE256);
 			memcpy(bak, n, sizeof(art_node256));
+			persistent(bak, sizeof(art_node256), 1);
 			pfree(bak, sizeof(art_node256));
 		}
     n->n.num_children++;
@@ -424,10 +488,12 @@ static void add_child48(art_node48 *n, art_node **ref, unsigned char c, void *ch
 			{
 				art_node48 * bak = (art_node48 *)alloc_node(NODE48);
 				memcpy(bak, n, sizeof(art_node48));
+				persistent(bak, sizeof(art_node48), 1);
 				pfree(bak, sizeof(art_node48));
 			}
         while (n->children[pos]) pos++;
         n->children[pos] = (art_node*)child;
+        persistent(&(n->children[pos]), sizeof(art_node*), 1);
         n->keys[c] = pos + 1;
         n->n.num_children++;
     } else {
@@ -441,6 +507,7 @@ static void add_child48(art_node48 *n, art_node **ref, unsigned char c, void *ch
         *ref = (art_node*)new_node;
         pfree(n, sizeof(art_node48));
         add_child256(new_node, ref, c, child);
+        persistent(new_node, sizeof(art_node256), 1);
     }
 }
 
@@ -489,6 +556,7 @@ static void add_child16(art_node16 *n, art_node **ref, unsigned char c, void *ch
 		{
 			art_node16 * bak = (art_node16 *)alloc_node(NODE16);
 			memcpy(bak, n, sizeof(art_node16));
+			persistent(bak, sizeof(art_node16), 1);
 			pfree(bak, sizeof(art_node16));
 		}
             memmove(n->keys+idx+1,n->keys+idx,n->n.num_children-idx);
@@ -500,6 +568,7 @@ static void add_child16(art_node16 *n, art_node **ref, unsigned char c, void *ch
         // Set the child
         n->keys[idx] = c;
         n->children[idx] = (art_node*)child;
+        persistent(&(n->children[idx]), sizeof(art_node *),1);
         n->n.num_children++;
 
     } else {
@@ -514,7 +583,8 @@ static void add_child16(art_node16 *n, art_node **ref, unsigned char c, void *ch
         copy_header((art_node*)new_node, (art_node*)n);
         *ref = (art_node*)new_node;
         pfree(n, sizeof(art_node16));
-        add_child48(new_node, ref, c, child);
+        add_child48(new_node, ref, c, child); 
+        persistent(new_node, sizeof(art_node48),1);
     }
 }
 
@@ -530,6 +600,7 @@ static void add_child4(art_node4 *n, art_node **ref, unsigned char c, void *chil
 		{
 			art_node4 * bak = (art_node4 *)alloc_node(NODE4);
 			memcpy(bak, n, sizeof(art_node4));
+			persistent(bak, sizeof(art_node4), 1);
 			pfree(bak, sizeof(art_node4));
 		}
         // Shift to make room
@@ -540,6 +611,7 @@ static void add_child4(art_node4 *n, art_node **ref, unsigned char c, void *chil
         // Insert element
         n->keys[idx] = c;
         n->children[idx] = (art_node*)child;
+        persistent(&( n->children[idx]), sizeof(art_node *), 1);
         n->n.num_children++;
 
     } else {
@@ -554,6 +626,7 @@ static void add_child4(art_node4 *n, art_node **ref, unsigned char c, void *chil
         *ref = (art_node*)new_node;
         pfree(n, sizeof(art_node4));
         add_child16(new_node, ref, c, child);
+        persistent(new_node, sizeof(art_node16),1);
     }
 }
 
