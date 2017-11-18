@@ -581,10 +581,8 @@ static void add_child4(art_node4 *n, art_node **ref, unsigned char c, void *chil
         persistent(&(n->keys[idx]), sizeof(unsigned char), 1);
         n->children[idx] = (art_node*)child;
         persistent(&( n->children[idx]), sizeof(art_node *), 1);
-        persistent(&( n->children[idx]), sizeof(art_node *), 1);
         n->n.num_children++;
         persistent(&(n->n.num_children), sizeof(uint8_t), 1);
-
         pfree(bak, sizeof(art_node4));
         pfree(temp_pointer, sizeof(art_node4*));
 

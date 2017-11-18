@@ -540,54 +540,7 @@ static void add_child48(art_node48 *n, art_node **ref, unsigned char c, void *ch
 static void add_child16(art_node16 *n, art_node **ref, unsigned char c, void *child) {
     if (n->n.num_children < 16) {
         /***************************************
-         * WOART use append only method, no need to sort/
-
-        /*
-        unsigned mask = (1 << n->n.num_children) - 1;
-
-        // support non-x86 architectures
-#ifdef __i386__
-        __m128i cmp;
-
-            // Compare the key to all 16 stored keys
-            cmp = _mm_cmplt_epi8(_mm_set1_epi8(c),
-                    _mm_loadu_si128((__m128i*)n->keys));
-
-            // Use a mask to ignore children that don't exist
-            unsigned bitfield = _mm_movemask_epi8(cmp) & mask;
-#else
-#ifdef __amd64__
-        __m128i cmp;
-
-        // Compare the key to all 16 stored keys
-        cmp = _mm_cmplt_epi8(_mm_set1_epi8(c),
-                             _mm_loadu_si128((__m128i*)n->keys));
-
-        // Use a mask to ignore children that don't exist
-        unsigned bitfield = _mm_movemask_epi8(cmp) & mask;
-#else
-        // Compare the key to all 16 stored keys
-            unsigned bitfield = 0;
-            for (short i = 0; i < 16; ++i) {
-                if (c < n->keys[i])
-                    bitfield |= (1 << i);
-            }
-
-            // Use a mask to ignore children that don't exist
-            bitfield &= mask;
-#endif
-#endif
-
-        // Check if less than any
-        unsigned idx;
-        if (bitfield) {
-            // determines the count of trailing zero in the binary representation of a number.
-            idx = __builtin_ctz(bitfield);
-            memmove(n->keys+idx+1,n->keys+idx,n->n.num_children-idx);
-            memmove(n->children+idx+1,n->children+idx,
-                    (n->n.num_children-idx)*sizeof(void*));
-        } else
-         */
+         * WOART use append only method, no need to sort*/
         unsigned  idx;
         idx = n->n.num_children;
 
@@ -606,9 +559,11 @@ static void add_child16(art_node16 *n, art_node **ref, unsigned char c, void *ch
         // Copy the child pointers and populate the key map
         memcpy(new_node->children, n->children,
                sizeof(void*)*n->n.num_children);
+        persistent(new_node->children, sizeof(void*)*n->n.num_children, 1);
         for (int i=0;i<n->n.num_children;i++) {
             new_node->keys[n->keys[i]] = i + 1;
         }
+        persistent(new_node->keys, sizeof(char) * n->n.num_children);
         copy_header((art_node*)new_node, (art_node*)n);
         *ref = (art_node*)new_node;
         pfree(n, sizeof(art_node16));
@@ -632,7 +587,7 @@ static void add_child4(art_node4 *n, art_node **ref, unsigned char c, void *chil
             if (c < n->keys_slot[idx2]) break;
         }
         unsigned char tmp_keys_slot[8];
-	memcpy(tmp_keys_slot, n->keys_slot, sizeof(tmp_keys_slot));
+	    memcpy(tmp_keys_slot, n->keys_slot, sizeof(tmp_keys_slot));
         /*for (int i = 0; i < 8; ++i) {
             tmp_keys_slot[i] = n->keys_slot[i];
         }*/
@@ -644,26 +599,11 @@ static void add_child4(art_node4 *n, art_node **ref, unsigned char c, void *chil
         memmove(tmp_keys_slot+idx2+1+4, tmp_keys_slot+idx2+4, n->n.num_children - idx2);
         tmp_keys_slot[idx2] = c;
         tmp_keys_slot[idx2 + 4] = (unsigned char)(idx1);
-        //pfree(n->keys_slot, sizeof(unsigned char)*8);
-        //n->keys_slot = tmp_keys_slot;
-	memcpy(n->keys_slot, tmp_keys_slot, sizeof(tmp_keys_slot));
+	    memcpy(n->keys_slot, tmp_keys_slot, sizeof(tmp_keys_slot));
         PERSISTENT_BARRIER();
-        /*
-        char tmp;
-        for (int i = 0; i < 8; ++i) {
-            tmp = n->keys_slot[i];
-        }
-        */
         persistent(n->keys_slot, sizeof(char)*8,1);
         n->n.num_children++;
-//        memmove(n->children+idx+1, n->children+idx,
-//                (n->n.num_children - idx)*sizeof(void*));
-//
-//        // Insert element
-//        n->keys[idx] = c;
-//        n->children[idx] = (art_node*)child;
-//        n->n.num_children++;
-
+        persistent(&(n->n.num_children), sizeof(char)*8,1);
     } else {
         art_node16 *new_node = (art_node16*)alloc_node(NODE16);
 
@@ -671,6 +611,7 @@ static void add_child4(art_node4 *n, art_node **ref, unsigned char c, void *chil
 
         memcpy(new_node->children, n->children,
                sizeof(void*)*n->n.num_children);
+        persistent(new_node->children, sizeof(void*)*n->n.num_children), 1);
         /*******************************************
           *FOR WOART: need to change the order of children
           * Or the order of keys
@@ -679,12 +620,15 @@ static void add_child4(art_node4 *n, art_node **ref, unsigned char c, void *chil
         for (int i = 0; i < n->n.num_children; i++)
         {
             idx = n->keys_slot[i+4];
-            new_node->keys[idx] = n->keys_slot[i];
+            new_node->keys[idx] = n->keys_slot[i];       
         }
+        persistent(new_node->keys, sizeof(new_node->keys),1);
+        
 //        memcpy(new_node->keys, n->keys_slot,
 //               sizeof(unsigned char)*n->n.num_children);
         copy_header((art_node*)new_node, (art_node*)n);
         *ref = (art_node*)new_node;
+        persistent(ref, sizeof(art_node **), 1);
         //pfree(n->keys_slot, sizeof(unsigned char)*8);
         //n->keys_slot = NULL;
         pfree(n, sizeof(art_node4));

@@ -23,8 +23,7 @@ extern "C" {
 #define ALLOCATED 0
 #define INITILIZED 1
 #define INLIST 2
-#define INVALID 3
-#define REMOVED 4
+#define REMOVED 3
 
 #define MAX_PREFIX_LEN 10
 
@@ -99,12 +98,8 @@ struct art_leaf{
     art_leaf *next;
     art_leaf *prev;
     void *value;
-    //add a status to indicates the status of a leaf node
-    //0
-    //1
-    uint32_t status;
-    uint32_t key_len;
     unsigned char key[24];
+    uint32_t key_len;
 };
 
 
@@ -128,6 +123,7 @@ typedef struct {
     art_leaf *leaf_head;
     art_log *log_head;
     uint64_t size;
+    uint64_t flush_count;
 } art_tree;
 
 

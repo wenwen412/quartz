@@ -185,6 +185,37 @@ void * slab_allocate(uint8_t type, size_t size)
 
 
 /**********************************************************************
+********       status in leaf function   *****************
+**********************************************************************/
+inline void set_status(art_leaf *l, uint8_t status)
+{	
+    uint32_t key_len = 0xfffffffc;
+    key_len = (l->key_len & 0xfffffffc) | (status & 0x3);
+    l->key_len = key_len;
+    persistent(&l->key_len, sizeof(uint32_t), 1);
+}
+
+
+inline uint8_t read_status(art_leaf *l)
+{	
+    return (uint8_t)(0x3&l->key_len);
+}
+
+
+inline void set_keylen(art_leaf *l, uint32_t key_len)
+{	
+    l->key_len = (l->key_len &0x3) | (key_len << 2);
+    persistent(&(l->key_len), sizeof(uint32_t), 1);
+}
+
+
+inline uint32_t read_keylen(art_leaf *l)
+{
+    return (uint32_t)(l->key_len >> 2);	
+}
+
+
+/**********************************************************************
 ********       art data structure code start here    *****************
 **********************************************************************/
 /**
@@ -232,6 +263,7 @@ int art_tree_init(art_tree *t) {
     t->log_head = head;
 
     t->size = 0;
+    t->flush_count = 0;
     printf("init return 0");
     return 0;
 }
@@ -477,7 +509,7 @@ static int check_prefix(const art_node *n, const unsigned char *key, int key_len
 static int leaf_matches(const art_leaf *n, const unsigned char *key, int key_len, int depth) {
     (void)depth;
     // Fail if the key lengths are different
-    if (n->key_len != (uint32_t)key_len) return 1;
+    if (read_keylen(n) != (uint32_t)key_len) return 1;
 
     // Compare the keys starting at the depth
     return memcmp(n->key, key, key_len);
@@ -547,7 +579,6 @@ void* art_search(const art_tree *t, const unsigned char *key, int key_len) {
                 return NULL;
             depth = depth + n->partial_len;
         }
-
         // Recursively search
         child = find_child(n, key[depth]);
         n = (child) ? *child : NULL;
@@ -696,20 +727,24 @@ int invalid_log(art_log **log_head,art_leaf * leaf)
  * */
 static art_leaf* make_leaf(art_log **log_head, const unsigned char *key, int key_len, uint64_t *value) {
     art_leaf *l = (art_leaf*)slab_allocate(LEAF_NODE, sizeof(art_leaf));
-    l->status = ALLOCATED;
-    persistent(&(l->status), sizeof(uint32_t),0);
+    //FIXME: Do we need to set status here?
+    //set_status(l, ALLOCATED); 
+    //l->status = ALLOCATED;
+    //persistent(&(l->status), sizeof(uint32_t),0);
     add_log(log_head, l);
     l->value = (void *)pmalloc(sizeof(uint64_t));
     memcpy(l->value, value, sizeof(uint64_t));
     persistent(l->value, sizeof(uint64_t), 1);
-    l->key_len = key_len;
+    set_keylen(l, key_len);
+    //l->key_len = key_len;
     memcpy(l->key, key, key_len);
     l->prev = NULL;
     l->next = NULL;
     persistent(&(l->next), sizeof(art_leaf *),1);
     persistent(&(l->prev), sizeof(art_leaf *),1);
-    l->status = INITILIZED;
-    persistent(&(l->status), sizeof(uint32_t),1);
+    //set_status(l, INITILIZED);
+    //l->status = INITILIZED;
+    //persistent(&(l->status), sizeof(uint32_t),1);
     return l;
 }
 
@@ -724,7 +759,7 @@ static art_leaf* make_leaf(art_log **log_head, const unsigned char *key, int key
  * return the length of common prefix
  * */
 static int longest_common_prefix(art_leaf *l1, art_leaf *l2, int depth) {
-    int max_cmp = min(l1->key_len, l2->key_len) - depth;
+    int max_cmp = min(read_keylen(l1), read_keylen(l2)) - depth;
     int idx;
     for (idx=0; idx < max_cmp; idx++) {
         if (l1->key[depth+idx] != l2->key[depth+idx])
@@ -906,7 +941,7 @@ static int prefix_mismatch(const art_node *n, const unsigned char *key, int key_
         // Prefix is longer than what we've checked, find a min leaf l
         //and get  the prefix of key and l
         art_leaf *l = minimum(n);
-        max_cmp = min(l->key_len, key_len)- depth;
+        max_cmp = min(read_keylen(l), key_len)- depth;
         for (; idx < max_cmp; idx++) {
             if (l->key[idx+depth] != key[depth+idx])
                 return idx;
@@ -924,18 +959,19 @@ static void linklist_insert(art_log *log_head, art_leaf **leaf_header, art_leaf 
 {
     node->next = *leaf_header;
     node->prev = NULL;
-    persistent(&(node->next), sizeof(art_leaf *), 0);
-    persistent(&(node->prev), sizeof(art_leaf *), 0);
+    //persistent(&(node->next), sizeof(art_leaf *), 0);
+    //persistent(&(node->prev), sizeof(art_leaf *), 0);
 
     if (*leaf_header != NULL)
     {
         (*leaf_header)->prev = node;
-        persistent((*leaf_header)->prev, sizeof(void*),0);
+        //persistent((*leaf_header)->prev, sizeof(void*),0);
     }
     *leaf_header = node;
-    persistent(*leaf_header, sizeof(art_leaf),0);
-    node->status = INLIST;
-    persistent(&(node->status),sizeof(uint32_t),1);
+    //persistent(*leaf_header, sizeof(art_leaf),0);
+    set_status(node, INLIST);
+    //node->status = INLIST;
+    //persistent(&(node->status),sizeof(uint32_t),1);
 }
 
 static void* recursive_insert_leaf(art_tree *t, art_node *n, art_node **ref,
@@ -944,7 +980,7 @@ static void* recursive_insert_leaf(art_tree *t, art_node *n, art_node **ref,
     // If we are at a NULL node, inject a leaf
     art_node *tmp;
     const unsigned char *key = leaf->key;
-    int key_len = leaf->key_len;
+    int key_len = read_keylen(leaf);
     uint64_t *value = leaf->value;
 
     if (!n) {
@@ -962,7 +998,7 @@ static void* recursive_insert_leaf(art_tree *t, art_node *n, art_node **ref,
         // Check if we are updating an existing value, depth not used
         // leaf_matches() returns 0 when match
         if (!leaf_matches(l, key, key_len, depth)) {
-            printf("error, find replicate keys during recobvery");
+            printf("error, find replicate keys during recovery");
             return NULL;
         }
 
@@ -1017,8 +1053,6 @@ static void* recursive_insert_leaf(art_tree *t, art_node *n, art_node **ref,
         art_leaf *l = leaf;
         //Wen Pan: insert into linked list
         add_child4(new_node, ref, key[depth+prefix_diff], SET_LEAF(l));
-        if(invalid_log(log_header, l))
-            printf("Error, can't find node in log");
         return NULL;
     }
 
@@ -1069,9 +1103,7 @@ static void* recursive_insert(art_tree *t, art_node *n, art_node **ref,
         // fixme: need to prevent memory leak
         linklist_insert(*log_header, leaf_header, LEAF_RAW (tmp));
         *ref = tmp;
-        //set the log invalid; we don't delete it immedially for future use
-        if(invalid_log(log_header, (art_leaf *)LEAF_RAW(tmp)))
-            printf("Error, can't find node in log");
+
         return NULL;
     }
 
@@ -1109,8 +1141,6 @@ static void* recursive_insert(art_tree *t, art_node *n, art_node **ref,
         //Wen Pan: insert into linked list
         linklist_insert(*log_header, leaf_header, l2);
         add_child4(new_node, ref, l2->key[depth+longest_prefix], SET_LEAF(l2));
-        if(invalid_log(log_header, l2))
-            printf("Error, can't find node in log");
         return NULL;
     }
 
@@ -1150,8 +1180,6 @@ static void* recursive_insert(art_tree *t, art_node *n, art_node **ref,
         //Wen Pan: insert into linked list
         linklist_insert(*log_header, leaf_header, LEAF_RAW (l));
         add_child4(new_node, ref, key[depth+prefix_diff], SET_LEAF(l));
-        if(invalid_log(log_header, l))
-            printf("Error, can't find node in log");
         return NULL;
     }
 
@@ -1169,8 +1197,6 @@ static void* recursive_insert(art_tree *t, art_node *n, art_node **ref,
     //Wen Pan: insert into linked list
     linklist_insert(*log_header, leaf_header, LEAF_RAW (l));
     add_child(n, ref, key[depth], SET_LEAF(l));
-    if(invalid_log(log_header, l))
-        printf("Error, can't find node in log");
     return NULL;
 }
 
@@ -1376,9 +1402,9 @@ int remove_leaf_from_list(art_tree *t, art_leaf *l){
 
     //only one update is needed
     //persistent(&(next->prev), sizeof(void *),0);
-
-    l->status = REMOVED;
-    persistent(&(l->status), sizeof(uint32_t),1);
+    set_status(l, REMOVED);
+    //l->status = REMOVED;
+    //persistent(&(l->status), sizeof(uint32_t),1);
     l->prev = NULL;
     l->next = NULL;
     //persistent(l, 2 * sizeof(void *),0);
@@ -1415,7 +1441,7 @@ int art_delete(art_tree *t, const unsigned char *key, int key_len) {
         pfree(l->value, sizeof(uint64_t));
         //void *old = l->value;
         remove_leaf_from_list(t, l);
-        pfree(l, sizeof(art_leaf) + l->key_len);
+        pfree(l, sizeof(art_leaf) + read_keylen(l));
         return 0;
         //return old;
     }
@@ -1429,7 +1455,7 @@ static int recursive_iter(art_node *n, art_callback cb, void *data) {
     if (!n) return 0;
     if (IS_LEAF(n)) {
         art_leaf *l = LEAF_RAW(n);
-        return cb(data, (const unsigned char*)l->key, l->key_len, l->value);
+        return cb(data, (const unsigned char*)l->key, read_keylen(l), l->value);
     }
 
     int idx, res;
@@ -1492,7 +1518,7 @@ int art_iter(art_tree *t, art_callback cb, void *data) {
  */
 static int leaf_prefix_matches(const art_leaf *n, const unsigned char *prefix, int prefix_len) {
     // Fail if the key length is too short
-    if (n->key_len < (uint32_t)prefix_len) return 1;
+    if (read_keylen(n) < (uint32_t)prefix_len) return 1;
 
     // Compare the keys
     return memcmp(n->key, prefix, prefix_len);
@@ -1521,7 +1547,7 @@ int art_iter_prefix(art_tree *t, const unsigned char *key, int key_len, art_call
             // Check if the expanded path matches
             if (!leaf_prefix_matches((art_leaf*)n, key, key_len)) {
                 art_leaf *l = (art_leaf*)n;
-                return cb(data, (const unsigned char*)l->key, l->key_len, l->value);
+                return cb(data, (const unsigned char*)l->key, read_keylen(l), l->value);
             }
             return 0;
         }

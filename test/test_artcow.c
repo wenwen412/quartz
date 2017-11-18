@@ -6,7 +6,7 @@
 #include <inttypes.h>
 #include "flush_delay.h"
 
-extern int extera_latency;
+int extra_latency;
 
 
 int fail_unless(int8_t conditiona)
@@ -132,8 +132,10 @@ int test_art_insert_search(char * filename)
     finish = clock();
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
     printf( "ARTCOW Insert spends %f seconds\n", duration );
+    stats_report();
+    printf( "Flush count is %d \n", extra_latency);
 
-
+    /*
     //range query test
     fseek(f, 0, SEEK_SET);
     // Search for each line
@@ -154,7 +156,7 @@ int test_art_insert_search(char * filename)
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
     printf("clock cycle is %d\n",finish - start);
     printf( "ARTCOW range query spends %f seconds\n", duration );
-
+    */
 
     // Seek back to the start
     fseek(f, 0, SEEK_SET);
@@ -178,6 +180,8 @@ int test_art_insert_search(char * filename)
     finish = clock();
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
     printf( "ARTCOW search spends %f seconds\n", duration );
+    stats_report();
+    printf( "Flush count is %d \n", extra_latency);
 
    // Updates
     fseek(f, 0, SEEK_SET);
@@ -194,7 +198,8 @@ int test_art_insert_search(char * filename)
     finish = clock();
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
     printf( "ARTCOW update spends %f seconds\n", duration );
-
+    stats_report();
+    printf( "Flush count is %d \n", extra_latency);
 
     start = clock();
     // Check the minimum
@@ -231,9 +236,9 @@ int test_art_insert_search(char * filename)
     fail_unless(line == tree_nodes_num + repeart_keys + 1);
     finish = clock();
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
-    printf("\n%d updates happend\n",repeart_keys);
     printf( "ARTCOW delete max/min spends %f seconds\n", duration );
-
+    stats_report();
+    printf( "Flush count is %d \n", extra_latency);
     //res = art_tree_destroy(&t);
     //fail_unless(res == 0);
 }

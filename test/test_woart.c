@@ -10,7 +10,7 @@
 #include <inttypes.h>
 #include "flush_delay.h"
 
-extern int extera_latency;
+int extra_latency;
 
 int fail_unless(int8_t conditiona)
 {
@@ -134,8 +134,10 @@ int test_art_insert_search(char * filename)
     finish = clock();
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
     printf( "WOART Insert spends %f seconds\n", duration );
+    stats_report();
+	printf( "Flush count is %d \n", extra_latency);
 
-       //range query test
+    /*range query test
     fseek(f, 0, SEEK_SET);
     // Search for each line
     line = 1;
@@ -155,8 +157,8 @@ int test_art_insert_search(char * filename)
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
     printf("clock cycle is %d\n",finish - start);
     printf( "WOART range query spends %f seconds\n", duration );
-
-    //stats_report();
+    stats_report();
+    */
     // Seek back to the start
     fseek(f, 0, SEEK_SET);
 
@@ -180,6 +182,8 @@ int test_art_insert_search(char * filename)
     finish = clock();
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
     printf( "WOART search spends %f seconds\n", duration );
+    stats_report();
+    printf( "Flush count is %d \n", extra_latency);
 
     // Updates
     fseek(f, 0, SEEK_SET);
@@ -196,6 +200,8 @@ int test_art_insert_search(char * filename)
     finish = clock();
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
     printf( "WOART update spends %f seconds\n", duration );
+    stats_report();
+    printf( "Flush count is %d \n", extra_latency);
 
 
     //check max/min
@@ -230,10 +236,9 @@ int test_art_insert_search(char * filename)
     fail_unless(line == tree_nodes_num + repeart_keys + 1);
     finish = clock();
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
-    printf("%d updates happend\n",repeart_keys);
     printf( "WOART delete spends %f seconds\n", duration );
-
-
+    stats_report();
+    printf( "Flush count is %d \n", extra_latency);
     //res = art_tree_destroy(&t);
     //fail_unless(res == 0);
 }

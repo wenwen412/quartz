@@ -6,7 +6,7 @@
 #include <inttypes.h>
 #include "flush_delay.h"
 
-extern int extera_latency;
+int extra_latency;
 
 
 int fail_unless(int8_t conditiona)
@@ -199,7 +199,8 @@ int test_art_insert_search(char * filename)
     finish = clock();
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
     printf( "RART Insert spends %f seconds\n", duration );
-
+    stats_report();
+    printf( "Flush count is %d \n", extra_latency);
     //test_range_query(&t, 10000);
 
     //test_art_recovery(&t);
@@ -240,9 +241,10 @@ int test_art_insert_search(char * filename)
     finish = clock();
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
     printf( "RART search spends %f seconds\n", duration );
-
-   // Updates
-	/*
+    stats_report();
+	printf( "Flush count is %d \n", extra_latency);
+   
+    // Updatess
     fseek(f, 0, SEEK_SET);
     line = 1;
     start = clock();
@@ -257,8 +259,9 @@ int test_art_insert_search(char * filename)
     finish = clock();
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
     printf( "RART update spends %f seconds\n", duration );
-*/
-    test_art_update(&t, f);
+    stats_report();
+    printf( "Flush count is %d \n", extra_latency);
+    //test_art_update(&t, f);
 
 
     start = clock();
@@ -270,7 +273,7 @@ int test_art_insert_search(char * filename)
     fail_unless(l && strcmp((char*)l->key, "zythum") == 0);
     finish = clock();
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
-    printf( "RART delete spends %f seconds\n", duration );
+    printf( "RART find/max_min  spends %f seconds\n", duration );
 
     // delete
     line = 1;
@@ -294,6 +297,8 @@ int test_art_insert_search(char * filename)
     finish = clock();
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
     printf( "RART find max/min spends %f seconds\n", duration );
+    stats_report();
+    printf( "Flush count is %d \n", extra_latency);
 
 
     res = art_tree_destroy(&t);

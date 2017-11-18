@@ -1,26 +1,5 @@
-
-#define CPUFREQ 2000LLU /* MHz */
-#define NS2CYCLE(__ns) ((__ns) * CPUFREQ / 1000)
-#define LOG_MODE (0)
-
-#ifdef __i386__
-#include <emmintrin.h>
-#else
-#ifdef __amd64__
-#include <emmintrin.h>
-#endif
-#endif
-
-#define CACHELINE_SIZE (64)
-
-#define _mm_clflush(addr)\
-	asm volatile("clflush %0" : "+m" (*(volatile char *)(addr)))
-#define _mm_clflushopt(addr)\
-	asm volatile(".byte 0x66; clflush %0" : "+m" (*(volatile char *)(addr)))
-#define _mm_clwb(addr)\
-	asm volatile(".byte 0x66; xsaveopt %0" : "+m" (*(volatile char *)(addr)))
-#define _mm_pcommit()\
-	asm volatile(".byte 0x66, 0x0f, 0xae, 0xf8")
+#include "flush_delay.h"
+ #include <stdint.h>
 
 extern int extra_latency;
 
@@ -125,6 +104,7 @@ static inline void PERSISTENT_BARRIER(void)
 
 static inline void persistent(void *buf, uint32_t len, int fence)
 {
+    return;
     uint32_t i;
     len = len + ((unsigned long)(buf) & (CACHELINE_SIZE - 1));
     if(fence == 2)
