@@ -263,7 +263,6 @@ int test_art_insert_search(char * filename)
     printf( "Flush count is %d \n", extra_latency);
     //test_art_update(&t, f);
 
-
     start = clock();
     // Check the minimum
     art_leaf *l = art_minimum(&t);
@@ -295,22 +294,24 @@ int test_art_insert_search(char * filename)
         line++;
     }
     finish = clock();
+	
+	//add destory cost to a full deletion
+    res = art_tree_destroy(&t);
+    fail_unless(res == 0);
+
     duration = (double)(finish - start) / CLOCKS_PER_SEC;
-    printf( "RART find max/min spends %f seconds\n", duration );
+    printf( "RART deletion spends %f seconds\n", duration );
     stats_report();
     printf( "Flush count is %d \n", extra_latency);
 
 
-    res = art_tree_destroy(&t);
-    fail_unless(res == 0);
-
 }
+/*
 int test_range_query(art_tree *t, int n)
 {
     clock_t start, finish;
     long double duration;
     start = clock();
-    //unsigned char key[] = {"opt\0"};
     unsigned char key[ ]={"1010000\0"};
     uint32_t key_len;
     art_leaf *current_leaf =  art_search_leaf(t, (unsigned char*)key, 8);
@@ -325,7 +326,7 @@ int test_range_query(art_tree *t, int n)
     printf("clock cycle is %d\n",finish - start);
     printf( "ART range query spends %f seconds\n", duration );
 
-}
+}*/
 
 
 

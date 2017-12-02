@@ -29,7 +29,6 @@ int COW = 1;
 /**********************************************************************
  * ********   pmalloc() and pfree() wrap psedo code  ******************
  */
-/*
 
 void* pmalloc (size_t size){
     return malloc(size);
@@ -37,7 +36,8 @@ void* pmalloc (size_t size){
 
 void pfree (void *ptr, size_t size){
     return free(ptr);
-}*/
+}
+
 
 void *custom_calloc(size_t n, size_t size)
 {
@@ -565,11 +565,11 @@ static void add_child4(art_node4 *n, art_node **ref, unsigned char c, void *chil
         //THIS IS NOT REAL COW!!!
 
         art_node4 ** temp_pointer = (art_node4**) pmalloc(sizeof(art_node4*));
-        art_node4 * bak = (art_node16 *)alloc_node(NODE4);
+        art_node4 * bak = (art_node4 *)alloc_node(NODE4);
         *temp_pointer = bak;
         persistent(temp_pointer, sizeof(art_node4*), 1);
-        memcpy(bak, n, sizeof(art_node16));
-        persistent(bak, sizeof(art_node16), 1);
+        memcpy(bak, n, sizeof(art_node4));
+        persistent(bak, sizeof(art_node4), 1);
 
         // Shift to make room
         memmove(n->keys+idx+1, n->keys+idx, n->n.num_children - idx);
@@ -583,8 +583,8 @@ static void add_child4(art_node4 *n, art_node **ref, unsigned char c, void *chil
         persistent(&( n->children[idx]), sizeof(art_node *), 1);
         n->n.num_children++;
         persistent(&(n->n.num_children), sizeof(uint8_t), 1);
-        pfree(bak, sizeof(art_node4));
         pfree(temp_pointer, sizeof(art_node4*));
+        pfree(bak, sizeof(art_node4));
 
     } else {
         art_node16 *new_node = (art_node16*)alloc_node(NODE16);

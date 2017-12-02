@@ -6,7 +6,7 @@
 #include <assert.h>
 #include "woart.h"
 #include "flush_delay.h"
-#include "../src/lib/pmalloc.h"
+//#include "../src/lib/pmalloc.h"
 #ifdef __i386__
 #include <emmintrin.h>
 #else
@@ -42,7 +42,7 @@
 /**********************************************************************
  * ********   pmalloc() and pfree() wrap psedo code  ******************
  */
-/*
+
 void* pmalloc (size_t size){
     return malloc(size);
 }
@@ -50,7 +50,7 @@ void* pmalloc (size_t size){
 void pfree (void *ptr, size_t size) {
     return free(ptr);
 }
-*/
+
 
 
 void test_flush_latency()
@@ -563,7 +563,7 @@ static void add_child16(art_node16 *n, art_node **ref, unsigned char c, void *ch
         for (int i=0;i<n->n.num_children;i++) {
             new_node->keys[n->keys[i]] = i + 1;
         }
-        persistent(new_node->keys, sizeof(char) * n->n.num_children);
+        persistent(new_node->keys, sizeof(char) * n->n.num_children, 1);
         copy_header((art_node*)new_node, (art_node*)n);
         *ref = (art_node*)new_node;
         pfree(n, sizeof(art_node16));
@@ -611,7 +611,7 @@ static void add_child4(art_node4 *n, art_node **ref, unsigned char c, void *chil
 
         memcpy(new_node->children, n->children,
                sizeof(void*)*n->n.num_children);
-        persistent(new_node->children, sizeof(void*)*n->n.num_children), 1);
+        persistent(new_node->children, sizeof(void*)*n->n.num_children, 1);
         /*******************************************
           *FOR WOART: need to change the order of children
           * Or the order of keys

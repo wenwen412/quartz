@@ -4,7 +4,7 @@
 #include <strings.h>
 #include <assert.h>
 #include "art.h"
-#include "../src/lib/pmalloc.h"
+//#include "../src/lib/pmalloc.h"
 #include "flush_delay.h"
 
 #ifdef __i386__
@@ -21,7 +21,7 @@
 #define MAX_KEY_LEN 25
 #define MAX_VALUE_LEN 16
 #define PM_NODE_TYPES 2
-#define SLAB_ALLOCATE 0
+#define SLAB_ALLOCATE 1
 
 #define LOG_MODE 0
 /**
@@ -41,7 +41,7 @@
 /**********************************************************************
  * ********   pmalloc() and pfree() wrap psedo code  ******************
  */
-/*
+
 void* pmalloc (size_t size){
     return malloc(size);
 }
@@ -49,7 +49,32 @@ void* pmalloc (size_t size){
 void pfree (void *ptr, size_t size){
     return free(ptr);
 }
-*/
+
+
+void set_status(art_leaf *l, uint8_t status)
+{
+    uint32_t key_len = 0xfffffffc;
+    key_len = (l->key_len & 0xfffffffc) | (status & 0x3);
+    l->key_len = key_len;
+    //persistent(&l->key_len, sizeof(uint32_t), 1);
+}
+
+inline uint8_t read_status(art_leaf *l)
+{
+    return (uint8_t)(0x3&l->key_len);
+}
+
+void set_keylen(art_leaf *l, uint32_t key_len)
+{
+    l->key_len = (l->key_len &0x3) | (key_len << 2);
+    //persistent(&(l->key_len), sizeof(uint32_t), 1);
+}
+
+uint32_t  read_keylen(art_leaf *l)
+{
+    return (uint32_t)(l->key_len >> 2);
+}
+
 
 
 /* Slab allocation implementation
@@ -81,23 +106,11 @@ meta_node* init_alloc_meta(alloc_meta* tree_alloc_meta, uint8_t type)
     {
         tree_alloc_meta->leaf_chunk_head = (meta_node *) malloc(sizeof(meta_node));
         tree_alloc_meta->leaf_chunk_head->next = NULL;
-        tree_alloc_meta->leaf_chunk_head->mem_chunk = (art_leaf *)pmalloc((sizeof(art_leaf))*default_size);
-        tree_alloc_meta->leaf_chunk_head->bitmap = (unsigned char*)pmalloc(sizeof(char)*8);
         for (int i = 0; i < 8 ; ++i) {
             tree_alloc_meta->leaf_chunk_head->bitmap[i] = 0;
         }
         tree_alloc_meta->curr_leaf_chunk = tree_alloc_meta->leaf_chunk_head;
-    }
-    else
-    {
-        tree_alloc_meta->log_chunk_head = (meta_node *) malloc(sizeof(meta_node));
-        tree_alloc_meta->log_chunk_head->next = NULL;
-        tree_alloc_meta->log_chunk_head->mem_chunk = (meta_node *) malloc(sizeof(art_log)*default_size);
-        tree_alloc_meta->log_chunk_head->bitmap = (unsigned char*)pmalloc(sizeof(char)*8);
-        for (int i = 0; i < 8 ; ++i) {
-            tree_alloc_meta->log_chunk_head->bitmap[i] = 0;
-        }
-        tree_alloc_meta->curr_log_chunk = tree_alloc_meta->log_chunk_head;
+        persistent(&(tree_alloc_meta->curr_leaf_chunk), sizeof(meta_node *), 1);
     }
 }
 
@@ -106,28 +119,18 @@ meta_node * alloc_new_mem_trunk(uint8_t type)
 {
     uint16_t  default_size = 56;
     meta_node * prev_node;
-    meta_node * new_alloc_meta = (meta_node *) malloc(sizeof(meta_node));
+    meta_node * new_alloc_meta = (meta_node *) pmalloc(sizeof(meta_node));
     if(type == LEAF_NODE)
     {
         prev_node = tree_alloc_meta->curr_leaf_chunk;
         prev_node->next = new_alloc_meta;
-        new_alloc_meta->mem_chunk = (art_leaf *) pmalloc((sizeof(art_leaf))* default_size);
-        new_alloc_meta->bitmap = (unsigned char*)malloc(sizeof(char)*8);
+        persistent(&(prev_node->next), sizeof(meta_node *), 1);
         for (int i = 0; i < 8 ; ++i) {
             new_alloc_meta->bitmap[i] = 0;
         }
         tree_alloc_meta->curr_leaf_chunk = new_alloc_meta;
-    }
-    else
-    {
-        prev_node = tree_alloc_meta->curr_log_chunk;
-        prev_node->next = new_alloc_meta;
-        new_alloc_meta->mem_chunk = (art_log *) pmalloc(sizeof(art_log)* default_size);
-        new_alloc_meta->bitmap = (unsigned char*)pmalloc(sizeof(char)*8);
-        for (int i = 0; i < 8 ; ++i) {
-            new_alloc_meta->bitmap[i] = 0;
-        }
-        tree_alloc_meta->curr_log_chunk = new_alloc_meta;
+        new_alloc_meta->next = NULL;
+        persistent(new_alloc_meta, sizeof(meta_node), 1);
     }
     return new_alloc_meta;
 
@@ -137,7 +140,7 @@ meta_node * alloc_new_mem_trunk(uint8_t type)
  *      For leaf nodes, since key_len is different, here we use max key_len for sake of simplity*/
 void * slab_allocate(uint8_t type, size_t size)
 {
-    return pmalloc(size);
+    //return pmalloc(size);
     meta_node *curr_chunk;
 
     /*tree_alloc_meta only init one time for a progress*/
@@ -152,6 +155,7 @@ void * slab_allocate(uint8_t type, size_t size)
         tree_alloc_meta->log_recycle_list = NULL;
         init_alloc_meta(tree_alloc_meta, LEAF_NODE);
         init_alloc_meta(tree_alloc_meta, LOG_NODE);
+        persistent(tree_alloc_meta, sizeof(alloc_meta), 1);
     }
 
     // Init allocate space for header_maps. Only do this one time
@@ -169,6 +173,9 @@ void * slab_allocate(uint8_t type, size_t size)
     idx = (uint8_t)(curr_chunk[type].bitmap[7])& mask;
     if (idx == default_size )
     {
+        // FIXME: lazy persistent strategy: only call persistent() call for bitmap when switch to a new memory chunk
+        // FIXME: do we do the same for leaf node? if so we can save tons of times!
+        persistent(curr_chunk->bitmap, sizeof(char)*8, 1);
         curr_chunk = alloc_new_mem_trunk(type);
         idx = add_idx(curr_chunk, type);
     }
@@ -178,41 +185,9 @@ void * slab_allocate(uint8_t type, size_t size)
         // check if all the slot has been used in this memory block
     }
     if (type == LEAF_NODE)
-        return (curr_chunk->mem_chunk + idx - 1);
-    else
-        return ((art_log*)curr_chunk->mem_chunk + idx - 1);
+        return &(curr_chunk->mem_chunk[idx - 1]);
 }
 
-
-/**********************************************************************
-********       status in leaf function   *****************
-**********************************************************************/
-inline void set_status(art_leaf *l, uint8_t status)
-{	
-    uint32_t key_len = 0xfffffffc;
-    key_len = (l->key_len & 0xfffffffc) | (status & 0x3);
-    l->key_len = key_len;
-    persistent(&l->key_len, sizeof(uint32_t), 1);
-}
-
-
-inline uint8_t read_status(art_leaf *l)
-{	
-    return (uint8_t)(0x3&l->key_len);
-}
-
-
-inline void set_keylen(art_leaf *l, uint32_t key_len)
-{	
-    l->key_len = (l->key_len &0x3) | (key_len << 2);
-    persistent(&(l->key_len), sizeof(uint32_t), 1);
-}
-
-
-inline uint32_t read_keylen(art_leaf *l)
-{
-    return (uint32_t)(l->key_len >> 2);	
-}
 
 
 /**********************************************************************
@@ -328,19 +303,6 @@ static void destroy_node(art_node *n) {
     free(n);
 }
 
-
-int destory_log(art_log *head)
-{
-    art_log *node, *tmp;
-    node = head;
-    while (node != NULL)
-    {	tmp = node;
-        node = node->next;
-        pfree(tmp, sizeof(art_log));
-    }
-    return 0;
-}
-
 int destory_slab_leaf(alloc_meta * tree_alloc_meta)
 {
     meta_node * current_node, *prev_node;
@@ -349,8 +311,13 @@ int destory_slab_leaf(alloc_meta * tree_alloc_meta)
     {
         prev_node = current_node;
         current_node = current_node->next;
-        free(prev_node->mem_chunk);
-        free(prev_node->bitmap);
+        //bitmap change is unnecessary, however, we use it to emulate the random deletion cost
+        for (int i = 0; i < 8; i++)
+        {
+            prev_node->bitmap[i] = 0;
+            persistent(&(prev_node->bitmap[i]), sizeof(char), 1);
+        }
+        pfree(prev_node, sizeof(meta_node));
     }
     return 0;
 }
@@ -376,8 +343,6 @@ int art_tree_destroy(art_tree *t) {
     printf("Destory node\n");
     destroy_node(t->root);
     t->leaf_head = NULL;
-    printf("Destory log\n");
-    destory_log(t->log_head);
     if(SLAB_ALLOCATE)
     {
         destory_slab_leaf(tree_alloc_meta);
@@ -548,7 +513,6 @@ art_leaf* art_search_leaf(const art_tree *t, const unsigned char *key, int key_l
 }
 
 
-
 /**
  * Searches for a value in the ART tree
  * @arg t The tree
@@ -587,6 +551,7 @@ void* art_search(const art_tree *t, const unsigned char *key, int key_len) {
     return NULL;
 }
 
+
 // Find the minimum leaf under a node
 static art_leaf* minimum(const art_node *n) {
     // Handle base cases
@@ -612,6 +577,7 @@ static art_leaf* minimum(const art_node *n) {
             abort();
     }
 }
+
 
 // Find the maximum leaf under a node
 static art_leaf* maximum(const art_node *n) {
@@ -639,6 +605,7 @@ static art_leaf* maximum(const art_node *n) {
     }
 }
 
+
 /**
  * Returns the minimum valued leaf
  */
@@ -662,61 +629,6 @@ art_leaf* art_maximum(art_tree *t) {
 // }art_log;
 
 
-
-/**********************************************************************/
-/*************************  log operations  ***************************/
-/**********************************************************************/
-
-/**
- * fixme：add support for log reuse
- * add a log for
- * to prevent memory leak
- * log_heade is just a header
- * */
-void add_log(art_log **log_head, art_leaf *l){
-    if(LOG_MODE){
-        art_log* new_log;
-        new_log = slab_allocate(LOG_NODE, sizeof(art_log));
-        new_log->leaf = l;
-        new_log->next = (*log_head)->next;
-        persistent(new_log, sizeof(art_log),0);
-
-        (*log_head)->next = new_log;
-        persistent(*log_head, sizeof(void*),1);
-    }
-    return;
-}
-
-
-/**
- * invalid a log
- * Do not delete it because we can save it for future use
- * FIXME: here we just delete
- */
-int invalid_log(art_log **log_head,art_leaf * leaf)
-{
-    if (LOG_MODE){
-        art_log *p, *pre;                   //pre为前驱结点，p为查找的结点。
-        p = (*log_head)->next;
-        pre = (*log_head);
-        while(p->leaf != leaf)              //查找值为x的元素
-        {
-            pre = p;
-            p = p->next;
-        }
-        if (p->leaf != leaf)
-        {
-            printf("Warning, Can't find the right log to delete");
-            return 1;
-        }
-        pre->next = p->next;          //删除操作，将其前驱next指向其后继。
-        pfree(p, sizeof(art_log));
-        return 0;
-    }
-    return 0;
-}
-
-
 /**
  * 1. Allocate space
  * 2. Set status to ALLOCATED, Persistent it
@@ -728,20 +640,19 @@ int invalid_log(art_log **log_head,art_leaf * leaf)
 static art_leaf* make_leaf(art_log **log_head, const unsigned char *key, int key_len, uint64_t *value) {
     art_leaf *l = (art_leaf*)slab_allocate(LEAF_NODE, sizeof(art_leaf));
     //FIXME: Do we need to set status here?
-    //set_status(l, ALLOCATED); 
+    //set_status(l, ALLOCATED);
     //l->status = ALLOCATED;
     //persistent(&(l->status), sizeof(uint32_t),0);
-    add_log(log_head, l);
     l->value = (void *)pmalloc(sizeof(uint64_t));
     memcpy(l->value, value, sizeof(uint64_t));
     persistent(l->value, sizeof(uint64_t), 1);
     set_keylen(l, key_len);
     //l->key_len = key_len;
     memcpy(l->key, key, key_len);
-    l->prev = NULL;
-    l->next = NULL;
-    persistent(&(l->next), sizeof(art_leaf *),1);
-    persistent(&(l->prev), sizeof(art_leaf *),1);
+//    l->prev = NULL;
+//    l->next = NULL;
+//    persistent(&(l->next), sizeof(art_leaf *),1);
+//    persistent(&(l->prev), sizeof(art_leaf *),1);
     //set_status(l, INITILIZED);
     //l->status = INITILIZED;
     //persistent(&(l->status), sizeof(uint32_t),1);
@@ -830,14 +741,14 @@ static void add_child16(art_node16 *n, art_node **ref, unsigned char c, void *ch
         unsigned bitfield = _mm_movemask_epi8(cmp) & mask;
 #else
         // Compare the key to all 16 stored keys
-            unsigned bitfield = 0;
-            for (short i = 0; i < 16; ++i) {
-                if (c < n->keys[i])
-                    bitfield |= (1 << i);
-            }
+        unsigned bitfield = 0;
+        for (short i = 0; i < 16; ++i) {
+            if (c < n->keys[i])
+                bitfield |= (1 << i);
+        }
 
-            // Use a mask to ignore children that don't exist
-            bitfield &= mask;
+        // Use a mask to ignore children that don't exist
+        bitfield &= mask;
 #endif
 #endif
 
@@ -955,25 +866,29 @@ static int prefix_mismatch(const art_node *n, const unsigned char *key, int key_
  * Insert a leaf node into the double-linked-list
  * The operation is atomic safe
  * fixme: has to add mechanism to prevent persistent memory leak*/
-static void linklist_insert(art_log *log_head, art_leaf **leaf_header, art_leaf *node)
-{
-    node->next = *leaf_header;
-    node->prev = NULL;
-    //persistent(&(node->next), sizeof(art_leaf *), 0);
-    //persistent(&(node->prev), sizeof(art_leaf *), 0);
+//static void linklist_insert(art_log *log_head, art_leaf **leaf_header, art_leaf *node)
+//{
+//    node->next = *leaf_header;
+//    node->prev = NULL;
+//    //persistent(&(node->next), sizeof(art_leaf *), 0);
+//    //persistent(&(node->prev), sizeof(art_leaf *), 0);
+//
+//    if (*leaf_header != NULL)
+//    {
+//        (*leaf_header)->prev = node;
+//        //persistent((*leaf_header)->prev, sizeof(void*),0);
+//    }
+//    *leaf_header = node;
+//    //persistent(*leaf_header, sizeof(art_leaf),0);
+//    set_status(node, INLIST);
+//    //node->status = INLIST;
+//    //persistent(&(node->status),sizeof(uint32_t),1);
+//}
 
-    if (*leaf_header != NULL)
-    {
-        (*leaf_header)->prev = node;
-        //persistent((*leaf_header)->prev, sizeof(void*),0);
-    }
-    *leaf_header = node;
-    //persistent(*leaf_header, sizeof(art_leaf),0);
-    set_status(node, INLIST);
-    //node->status = INLIST;
-    //persistent(&(node->status),sizeof(uint32_t),1);
-}
 
+
+/* This function is different from recursive_insert
+ *  This function doesnot need to create a leaf node as leaf already exists*/
 static void* recursive_insert_leaf(art_tree *t, art_node *n, art_node **ref,
                                    art_leaf **leaf_header, art_log **log_header,
                                    int depth, int *old, art_leaf *leaf) {
@@ -1071,16 +986,48 @@ static void* recursive_insert_leaf(art_tree *t, art_node *n, art_node **ref,
     return NULL;
 }
 
+
+art_leaf * get_next_leaf(meta_node ** current_node, uint8_t * idx)
+{
+    uint16_t bit_map_array_index, shift_index;
+
+    while(*current_node != NULL)
+    {
+        if (*idx == 55)
+        {
+            *current_node = (*current_node)->next;
+        }
+        if (*current_node == NULL)
+            return NULL;
+        *idx = ((*idx) + 1) % 56;
+        bit_map_array_index = *idx / 8;
+        shift_index = (*idx) % 8;
+        if (((*current_node)->bitmap[bit_map_array_index]) & (1<<shift_index) != 0 )
+            break;
+    }
+
+
+    return (art_leaf *)(&((*current_node)->mem_chunk[*idx]));
+}
+
+
+/* RARTree recovery function
+ * FIXME: Need to recover from bulk memory instead of linked-leaf*/
 void* art_recover(art_tree *t, art_tree *old_T) {
     int old_val = 0;
-    art_leaf * current_leaf = old_T->leaf_head;
-    while (current_leaf) {
+    uint8_t idx ;
+    idx = 0;
+    meta_node * current_node = (tree_alloc_meta->leaf_chunk_head);
+    art_leaf * current_leaf = get_next_leaf(&current_node,&idx);
+    while (current_leaf ) {
         void *old = recursive_insert_leaf(t, t->root, &t->root, &t->leaf_head,
                                           &t->log_head, 0, &old_val, current_leaf);
         if (!old_val) t->size++;
-        current_leaf = current_leaf->next;
+        current_leaf = get_next_leaf(&current_node, &idx);
     }
 }
+
+
 
 
 /** n: the tree the are insert to
@@ -1100,8 +1047,7 @@ static void* recursive_insert(art_tree *t, art_node *n, art_node **ref,
     if (!n) {
         tmp = (art_node*)SET_LEAF(make_leaf(log_header, key, key_len, value));
         // leaf_header = LEAF_RAW (*ref);
-        // fixme: need to prevent memory leak
-        linklist_insert(*log_header, leaf_header, LEAF_RAW (tmp));
+        //linklist_insert(*log_header, leaf_header, LEAF_RAW (tmp));
         *ref = tmp;
 
         return NULL;
@@ -1139,7 +1085,7 @@ static void* recursive_insert(art_tree *t, art_node *n, art_node **ref,
         *ref = (art_node*)new_node;
         add_child4(new_node, ref, l->key[depth+longest_prefix], SET_LEAF(l));
         //Wen Pan: insert into linked list
-        linklist_insert(*log_header, leaf_header, l2);
+        //linklist_insert(*log_header, leaf_header, l2);
         add_child4(new_node, ref, l2->key[depth+longest_prefix], SET_LEAF(l2));
         return NULL;
     }
@@ -1178,7 +1124,7 @@ static void* recursive_insert(art_tree *t, art_node *n, art_node **ref,
         // Insert the new leaf
         art_leaf *l = make_leaf(log_header, key, key_len, value);
         //Wen Pan: insert into linked list
-        linklist_insert(*log_header, leaf_header, LEAF_RAW (l));
+        //linklist_insert(*log_header, leaf_header, LEAF_RAW (l));
         add_child4(new_node, ref, key[depth+prefix_diff], SET_LEAF(l));
         return NULL;
     }
@@ -1195,7 +1141,7 @@ static void* recursive_insert(art_tree *t, art_node *n, art_node **ref,
     // No child, node goes within us
     art_leaf *l = make_leaf(log_header, key, key_len, value);
     //Wen Pan: insert into linked list
-    linklist_insert(*log_header, leaf_header, LEAF_RAW (l));
+    //linklist_insert(*log_header, leaf_header, LEAF_RAW (l));
     add_child(n, ref, key[depth], SET_LEAF(l));
     return NULL;
 }
@@ -1383,42 +1329,51 @@ static art_leaf* recursive_delete(art_node *n, art_node **ref, const unsigned ch
  *
  * A special case： leaf is the header
  * */
-int remove_leaf_from_list(art_tree *t, art_leaf *l){
-
-
-    if(!l)
-        return 1;
-    art_leaf *prev, *next;
-
-    prev = l->prev;
-    next = l->next;
-
-    if (prev != NULL) {
-        prev->next = next;
-        persistent(&(prev->next), sizeof(void *), 0);
-    }
-    if (next != NULL)
-        next->prev = prev;
-
-    //only one update is needed
-    //persistent(&(next->prev), sizeof(void *),0);
-    set_status(l, REMOVED);
-    //l->status = REMOVED;
-    //persistent(&(l->status), sizeof(uint32_t),1);
-    l->prev = NULL;
-    l->next = NULL;
-    //persistent(l, 2 * sizeof(void *),0);
-
-    if(t->leaf_head == l)
-        t->leaf_head = l->next;
-    return 0;
-}
+//int remove_leaf_from_list(art_tree *t, art_leaf *l){
+//
+//
+//    if(!l)
+//        return 1;
+//    art_leaf *prev, *next;
+//
+//    prev = l->prev;
+//    next = l->next;
+//
+//    if (prev != NULL) {
+//        prev->next = next;
+//        persistent(&(prev->next), sizeof(void *), 0);
+//    }
+//    if (next != NULL)
+//        next->prev = prev;
+//
+//    //only one update is needed
+//    //persistent(&(next->prev), sizeof(void *),0);
+//    set_status(l, REMOVED);
+//    //l->status = REMOVED;
+//    //persistent(&(l->status), sizeof(uint32_t),1);
+//    l->prev = NULL;
+//    l->next = NULL;
+//    //persistent(l, 2 * sizeof(void *),0);
+//
+//    if(t->leaf_head == l)
+//        t->leaf_head = l->next;
+//    return 0;
+//}
 
 void *delete_log(art_tree *t,const unsigned char *key){
     return NULL;
 
 }
 
+
+//FIXME: a possible solution is to check the address of l and find the memory chunk address range contains l
+// pseudo code for deletetion
+// mark_delete only remove corresponding bit in the bitmap
+// Assume a background GC process check on each memory chunk for final free() process
+void mark_delete(art_tree *t, art_leaf *l)
+{
+    return;
+}
 
 /**
  * Deletes a value from the ART tree
@@ -1440,8 +1395,11 @@ int art_delete(art_tree *t, const unsigned char *key, int key_len) {
         void *old = l->value;
         pfree(l->value, sizeof(uint64_t));
         //void *old = l->value;
-        remove_leaf_from_list(t, l);
-        pfree(l, sizeof(art_leaf) + read_keylen(l));
+        // pseudo code for deletetion
+        // mark_delete only remove corresponding bit in the bitmap
+        // Assume a background GC process check on each memory chunk for final free() process
+        mark_delete(t, l);
+        //pfree(l, sizeof(art_leaf) + read_keylen(l));
         return 0;
         //return old;
     }

@@ -95,8 +95,6 @@ typedef struct {
  */
 typedef struct art_leaf art_leaf;
 struct art_leaf{
-    art_leaf *next;
-    art_leaf *prev;
     void *value;
     unsigned char key[24];
     uint32_t key_len;
@@ -128,9 +126,9 @@ typedef struct {
 
 
 typedef struct{
-    unsigned char * bitmap;
-    void *mem_chunk;
-    void * next;
+    unsigned char bitmap[8];
+    art_leaf mem_chunk[56];
+    struct meta_node * next;
 }meta_node;
 
 typedef struct{
@@ -142,6 +140,8 @@ typedef struct{
     meta_node * curr_log_chunk;
     art_log * log_recycle_list;
 }alloc_meta;
+
+
 
 /**
  * Initializes an ART tree
@@ -255,6 +255,7 @@ int art_iter_prefix(art_tree *t, const unsigned char *prefix, int prefix_len, ar
 #endif
 
 #endif
+
 
 
 

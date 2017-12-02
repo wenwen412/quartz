@@ -28,7 +28,6 @@ typedef uint64_t pcm_hrtime_t;
 #if defined(__i386__)
 
 
-
 static inline unsigned long long asm_rdtsc(void)
 {
     unsigned long long int x;
